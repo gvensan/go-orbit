@@ -64,6 +64,27 @@ test("a corrupted DB self-heals from the newest good snapshot on open", (t) => {
   assert.equal(quarantined.length, 1, "corrupt file was not quarantined");
 });
 
+test("a wrong key never quarantines or replaces the live database", (t) => {
+  const dir = tmpDir(t);
+  const dbPath = path.join(dir, "app.db");
+  const backupDir = path.join(dir, "backups");
+  const db = dbLayer.openDatabase({ dbPath, backupDir, key: TEST_KEY });
+  contacts.create(db, { name: "Must Stay Put" });
+  dbLayer.checkpointAndClose(db);
+  const before = fs.readFileSync(dbPath);
+
+  assert.throws(
+    () => dbLayer.openDatabase({ dbPath, backupDir, key: "definitely-wrong" }),
+    /Database could not be verified/
+  );
+  assert.deepEqual(fs.readFileSync(dbPath), before, "live database bytes changed after a key failure");
+  assert.equal(
+    fs.readdirSync(dir).some((name) => name.includes(".corrupt-")),
+    false,
+    "key failure quarantined a healthy database"
+  );
+});
+
 test("no plaintext leaks to disk and the DB is unreadable without the key", (t) => {
   const { db, dbPath } = makeDb(t);
   contacts.create(db, {

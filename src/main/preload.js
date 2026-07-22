@@ -99,6 +99,10 @@ const api = {
       return () => ipcRenderer.removeListener("app:menu", listener);
     },
   },
+  updates: {
+    status: invoke("update:status"),
+    check: invoke("update:check"),
+  },
   dedup: {
     candidates: invoke("dedup:candidates"),
     merge: invoke("dedup:merge"),

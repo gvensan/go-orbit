@@ -122,8 +122,9 @@ function startBackupScheduler(
 
 // ---------------------------------------------------------------------------
 // Open: key -> pragmas -> quick_check -> migrate. Self-heals from the newest
-// good snapshot when the file is corrupt; quarantines and starts clean only
-// when no good snapshot exists (the app must still boot).
+// good snapshot when one exists. If neither the live file nor a backup can be
+// verified, fail closed and leave every byte in place: loader/ABI failures and
+// a wrong key are not evidence that the database itself is corrupt.
 // ---------------------------------------------------------------------------
 
 function openKeyed(dbPath, key) {
@@ -162,6 +163,7 @@ function openDatabase({ dbPath, backupDir, key, log = () => {} }) {
 
   if (fs.existsSync(dbPath)) {
     let db = null;
+    let openError = null;
     try {
       db = openKeyed(dbPath, key);
       if (isHealthy(db)) {
@@ -172,6 +174,7 @@ function openDatabase({ dbPath, backupDir, key, log = () => {} }) {
       log("[db] quick_check failed, attempting restore");
     } catch (e) {
       try { db?.close(); } catch {}
+      openError = e;
       log(`[db] open failed, attempting restore: ${e.message}`);
     }
 
@@ -180,9 +183,12 @@ function openDatabase({ dbPath, backupDir, key, log = () => {} }) {
       migrateAtBoot(db2, dbPath, backupDir, key, log);
       return db2;
     }
-    // No good backup: quarantine so the app still boots. Loud, never silent.
-    log("[db] NO GOOD BACKUP FOUND - quarantining corrupt file and starting fresh");
-    quarantine(dbPath);
+    // A native-addon ABI mismatch, missing shared library, unavailable keychain,
+    // or wrong key can make both the live file and every backup unreadable. Do
+    // not mislabel that as corruption or replace the user's data with an empty DB.
+    log("[db] NO VERIFIED BACKUP FOUND - leaving the database untouched");
+    const reason = openError?.message ? ` (${openError.message})` : "";
+    throw new Error(`Database could not be verified and no readable backup was found${reason}`);
   }
 
   const db = openKeyed(dbPath, key);

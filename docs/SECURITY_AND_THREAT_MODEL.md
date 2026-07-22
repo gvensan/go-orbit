@@ -22,7 +22,7 @@ Out of scope (v1, stated so it's a decision not an omission):
 
 - A privileged attacker with the machine unlocked and the app open (they already have the user's session).
 - Memory forensics / cold-boot attacks.
-- Network adversaries — the app makes no data connections except signed update checks.
+- Network adversaries — main-process requests are limited to signed update checks, map tiles, and location searches; the renderer cannot connect directly.
 - Supply-chain integrity of dependencies beyond lockfile pinning.
 
 ## 3. Encryption at rest
@@ -50,7 +50,7 @@ Asserted at window creation (`config.security`):
 ## 6. Privacy posture
 
 - No telemetry by default. Crash reporting is opt-in and PII-scrubbed (`electron-log` local by default; Sentry opt-in).
-- No data leaves the device except: user-initiated export, and signed update checks to the release feed.
+- No contact graph, names, relationships, or notes leave the device except through user-initiated export. Signed update checks run automatically. Detailed map tiles and location search are enabled by default and disclose the viewed map area or typed location query to their providers; users can disable both in Settings.
 - Logs never contain contact PII in production; search query strings are not logged with content.
 
 ## 7. Acceptance criteria
@@ -60,4 +60,4 @@ Asserted at window creation (`config.security`):
 3. The renderer cannot reach Node APIs, the filesystem, or a remote origin (verified by attempted access failing).
 4. An invalid or oversized IPC payload is rejected with `VALIDATION` and never reaches the data layer.
 5. A tampered or wrong-passphrase import archive fails closed with no partial write.
-6. Default install performs no network calls except update checks; disabling updates makes it fully offline.
+6. Default install connects only for signed updates and when detailed maps/location search are used; disabling updates and “Online maps & location search” makes it fully offline.

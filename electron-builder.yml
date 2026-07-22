@@ -48,6 +48,8 @@ nsis:
 
 linux:
   category: Utility
+  maintainer: Orbit
+  vendor: Orbit
   target:
     - AppImage
     - deb

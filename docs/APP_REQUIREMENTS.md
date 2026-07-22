@@ -93,8 +93,8 @@ Local-first, main-process-orchestrated. Boot brings components up in dependency 
 which is authoritative for anything not in the tables above): owner profile
 ("you" as an inner-circle contact), Explore (faceted people-search), Find
 (structured query builder), Insights page + breakdowns, saved searches, quick
-add, keep-in-touch cadence + starred, Geomap (offline vector base with opt-in
-online OSM tiles), opt-in online location search/backfill, sample datasets,
+add, keep-in-touch cadence + starred, Geomap (offline vector fallback with
+default-on, user-disableable OSM tiles), online location search/backfill, sample datasets,
 clear-all, native menu + sidebar chrome.
 
 ## 7. Data model
@@ -145,14 +145,14 @@ Search projection and FTS5/trigram tables are defined in `SEARCH_REQUIREMENTS.md
 ## 8. Cross-cutting requirements
 
 - **Durability:** every multi-statement write in a transaction; `quick_check` on boot with auto-restore; final checkpoint + close on every exit path.
-- **Privacy:** encrypted at rest; no telemetry by default; crash reporting opt-in and scrubbed; nothing leaves the device except user-initiated export. One deliberate, opt-in exception (see `DECISIONS.md`): when "Online maps & location search" is enabled, the **main process** fetches city geocoding and OSM map tiles; the renderer keeps `connect-src 'none'` and only location query strings ever go out - never contact data.
+- **Privacy:** encrypted at rest; no telemetry by default; crash reporting opt-in and scrubbed. Online maps and location search are enabled by default and user-disableable: the **main process** fetches geocoding and OSM/CARTO tiles, while the renderer keeps `connect-src 'none'`. Viewed map areas and location query strings go to those providers; names, relationships, notes, and the contact graph do not.
 - **Portability:** SQLite's file format is cross-platform, so a backup or export from one OS restores on another. Export archives are the disaster-recovery and device-migration floor.
 - **Security:** hardened renderer; validated IPC; no remote content, scripts, or fonts at runtime.
 - **Performance:** heavy compute (layout, betweenness, search) off the main thread; interactive framerate and sub-50 ms search at full scale.
 
 ## 9. Non-goals (v1)
 
-Multi-device sync, cloud storage, accounts, multi-user/collaboration, server-side anything, 3D graph rendering, mobile, and semantic/vector search. Cross-device is export/import only. (Geographic rendering was originally a non-goal; the Geomap amendment in `DECISIONS.md` superseded that with an offline-first vector map plus opt-in online tiles.)
+Multi-device sync, cloud storage, accounts, multi-user/collaboration, server-side anything, 3D graph rendering, mobile, and semantic/vector search. Cross-device is export/import only. (Geographic rendering was originally a non-goal; the Geomap amendment in `DECISIONS.md` superseded that with detailed online tiles and an offline vector fallback.)
 
 ## 10. Acceptance criteria (app-level)
 

@@ -24,24 +24,25 @@ Full intent and feature tiers: `docs/APP_REQUIREMENTS.md`.
 - **JavaScript, CommonJS** (`require`/`module.exports`) — matches `src/main/main.js`. TypeScript is acceptable if you migrate the whole tree, but do not mix.
 - Domain and IPC types are declared in `src/shared/types.d.ts`. Treat them as the contract even in JS; annotate with JSDoc `@type` imports.
 - All tunables live in `src/main/config.js`. Never hardcode a weight, interval, or threshold elsewhere.
-- Node ≥ 20, npm.
+- Node 24 LTS (24.18+), npm; use `.nvmrc`.
 
 ## Commands
 
 ```
-npm install            # plain install; native module lands on the Node ABI
-npm run dev            # rebuilds native module for Electron + builds renderer, then launches
+npm install            # installs, rebuilds + verifies native SQLite for Electron
+npm run dev            # verifies native ABI, builds renderer, then launches
 npm run dev:watch      # same, plus auto-reload: renderer edits reload the window, main edits restart Electron
-npm test               # rebuilds native module for Node, runs unit + acceptance suite
+npm test               # tests via Electron's embedded Node (same native ABI as the app)
 npm run typecheck      # tsc --checkJs against src/shared/types.d.ts (CI-enforced)
 npm run migrate        # dev CLI migrate against .dev/contacts.db
 npm run fixture        # generate a 20k-contact / ~190k-edge clustered test DB
 npm run build          # electron-builder for the current OS (prebuild handles renderer + ABI)
 ```
 
-ABI note: `dev`/`build` and `test`/scripts need different native-module ABIs
-(Electron vs Node). The pre-hooks switch automatically; each switch is a quick
-prebuilt-binary download. See docs/DECISIONS.md.
+ABI note: the workspace always uses Electron's embedded Node ABI. Tests,
+migrations, fixtures, and smoke checks run through `scripts/electron-node.js`.
+Never run standalone `npm rebuild` for the SQLite addon; use
+`npm run rebuild:electron`. See docs/DECISIONS.md.
 
 ## Repo layout
 
@@ -81,6 +82,11 @@ any of them is a defect regardless of whether tests pass.
 - **All read paths filter `deleted_at IS NULL`.**
 - **Renderer is untrusted.** contextIsolation on, sandbox on, nodeIntegration off, strict CSP, no remote content. IPC payloads are validated in the main process before use.
 - **One writer.** The single-instance lock is boot-critical; two processes on one SQLite file corrupt it.
+- **Dependencies stay current deliberately.** Prefer the latest stable release
+  compatible with the shipped Electron/Node runtime, pin direct versions, and
+  commit the lockfile. Do not select prerelease/nightly packages or a higher
+  `@types/node` major than Electron embeds. Run the full type/test/build/native
+  smoke suite after framework, database, or native-module changes.
 
 ## Definition of done (per unit of work)
 

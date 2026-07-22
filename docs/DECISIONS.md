@@ -3,9 +3,24 @@
 Deliberate amendments to the original scaffold assumptions, per the CLAUDE.md
 rule that assumptions change deliberately, not by drift. Newest first.
 
+## 2026-07-22 - Graph position pinning removed
+
+- The session-only Pin Position action added little beyond persisted node drag
+  and made the connection menu less focused. It has been removed completely;
+  layout updates apply normally and dragged full-network positions still save.
+
+## 2026-07-22 - Detailed maps enabled by default
+
+- A missing `location.online` preference now means enabled. Zoomed Geomap views
+  therefore use detailed CARTO/OpenStreetMap tiles without requiring a trip to
+  Settings. An explicit off choice remains persistent and falls back to the
+  bundled country-outline map and city list. Map and geocoder traffic remains
+  main-process-only; the renderer CSP still has `connect-src 'none'`.
+
 ## 2026-07-22 - Persisted column movement is the table-view standard
 
-- **Explore headers have distinct move, sort, and resize targets.** Drag the
+- **Explore headers have distinct move, sort, and resize targets. Every data
+  column sorts through the main-process Explore service.** Drag the
   handle to place a column before or after another visible column; Alt+Left or
   Alt+Right provides the keyboard equivalent. The selection cell and Name stay
   anchored so row identity remains visible while scrolling.
@@ -38,7 +53,7 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Wheel/trackpad zoom is linear in the scroll delta and anchors on the cursor.
 - **Offline base bumped 110m -> 50m** country vectors (finer coastlines/borders),
   still fully bundled, zero network.
-- **Opt-in online tiles**: when "Online maps & location search" is on *and* the
+- **Online tile preference**: when "Online maps & location search" is on *and* the
   device is online, the Geomap draws OpenStreetMap raster tiles. This is remote
   content, so it is deliberate and gated: **tiles are fetched in the main
   process** (`src/main/maptiles.js`, new `map:tile` IPC channel gated on the same
@@ -47,7 +62,8 @@ rule that assumptions change deliberately, not by drift. Newest first.
   are cached on disk under `userData/tile-cache`. Falls back to the 50m vector
   map instantly when offline or opted out. Amends the "no remote content"
   guardrail the same way opt-in Photon geocoding already did: main-process fetch,
-  explicit consent, renderer stays sandboxed.
+  user control, renderer stays sandboxed. (The 2026-07-22 decision above later
+  changed the unset/default state from off to on.)
 - **Deceased glow is now steady** (no pulse), consistent across Graph, Network,
   and Geomap - a quiet memorial halo rather than an animated one.
 
@@ -416,9 +432,7 @@ Category-informed enhancements (Clay/Dex/Cloze/Monica patterns), local-only:
 - **PNG export** composes sigma's canvas layers in the renderer and ships
   base64 over IPC; main verifies the PNG magic bytes and only writes
   dialog-granted paths. GraphML is built main-side from the snapshot.
-- **Pin/unpin** (double-click) is session-scoped: pinned nodes are skipped by
-  layout ticks; their dragged positions persist through the existing
-  savePositions path. Onboarding is a one-time overlay gated by localStorage.
+- Onboarding is a one-time overlay gated by localStorage.
 - **Deliberately NOT built**: minimap and path animation (cost/benefit), and
   spellfix1 (the JS Jaro-Winkler + Damerau-Levenshtein scan already covers
   typo recall well under budget; revisit only if 20k-scale latency demands it).
@@ -502,11 +516,13 @@ both load the built output via `loadFile`, so `connect-src 'none'` holds
 everywhere. Renderer deps (sigma) are devDependencies; the package ships
 `dist/renderer` plus `src/main` + `src/shared` only.
 
-**Native module ABI strategy.** No postinstall rebuild. `npm test`,
-`npm run migrate`, and scripts run on the Node ABI; `npm run dev` and
-`npm run build` rebuild for Electron via pre-hooks (`rebuild:electron`).
-Switching costs one prebuilt-binary download. CI's test job therefore runs on
-plain Node; the build job's smoke test switches back explicitly.
+**Native module ABI strategy.** The working tree always targets Electron's
+embedded Node ABI. `postinstall` force-rebuilds the encrypted SQLite addon for
+the pinned stable Electron release, then opens a real in-memory database as an
+ABI check. Tests, migrations, fixture generation, and source smoke checks run
+through `scripts/electron-node.js`; none of them rewrites the native binary for
+standalone Node. This prevents a successful test run from making the desktop
+app fail on its next launch.
 
 **Types are enforced, not advisory.** `tsc --noEmit --checkJs` runs in CI
 (`npm run typecheck`) against `types.d.ts`, including the renderer

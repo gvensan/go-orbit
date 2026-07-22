@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const { buildRegistry } = require("../src/main/ipc/registry");
 const { GraphStore } = require("../src/main/graph/store");
 const { makeDb } = require("./helpers");
+const { EXPLORE_SORT_KEYS } = require("../src/main/explore/service");
 
 const isValidation = (err) => err.code === "VALIDATION";
 
@@ -56,4 +57,24 @@ test("valid payloads flow through handler and keep the graph in sync", (t) => {
   call("contacts:restore", { id: b.id });
   assert.equal(graph.order, 2);
   assert.equal(graph.size, 1, "restore did not re-link edges");
+});
+
+test("detailed maps default on but preserve an explicit opt-out", (t) => {
+  const { db } = makeDb(t);
+  const reg = buildRegistry({ db, graph: new GraphStore(), backupDir: "", key: "" });
+  const call = (channel, payload) => reg[channel].handle(reg[channel].validate(payload));
+
+  assert.deepEqual(call("location:online", {}), { enabled: true });
+  assert.deepEqual(call("location:setOnline", { enabled: false }), { enabled: false });
+  assert.deepEqual(call("location:online", {}), { enabled: false });
+  assert.deepEqual(call("location:setOnline", { enabled: true }), { enabled: true });
+  assert.deepEqual(call("location:online", {}), { enabled: true });
+});
+
+test("IPC accepts every Explore column sort key", (t) => {
+  const { db } = makeDb(t);
+  const reg = buildRegistry({ db, graph: new GraphStore(), backupDir: "", key: "" });
+  for (const sort of EXPLORE_SORT_KEYS) {
+    assert.equal(reg["explore:query"].validate({ sort }).sort, sort);
+  }
 });

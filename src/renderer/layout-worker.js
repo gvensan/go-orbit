@@ -21,7 +21,9 @@ self.onmessage = (e) => {
     }
   }
 
-  const settings = forceAtlas2.inferSettings(graph);
+  // Respect rendered node radii so rerunning the layout actually untangles
+  // overlapping contacts instead of only changing their centres.
+  const settings = { ...forceAtlas2.inferSettings(graph), adjustSizes: true };
   for (let done = 0; done < TOTAL_ITERATIONS; done += CHUNK_ITERATIONS) {
     forceAtlas2.assign(graph, { iterations: CHUNK_ITERATIONS, settings });
     const positions = {};

@@ -1,8 +1,8 @@
-// maptiles.js - opt-in online map tiles (OpenStreetMap raster). Like geocode.js,
+// maptiles.js - user-disableable online map tiles (OpenStreetMap raster). Like geocode.js,
 // the fetch happens in the MAIN process only; the renderer stays connect-src
 // 'none' and receives each tile as a data: URL to draw on canvas. Tiles are
 // cached on disk so panning/zooming doesn't refetch, and to be polite to OSM's
-// tile servers. Gated on the same "Online location search" opt-in.
+// tile servers. Gated on the same "Online maps & location search" preference.
 
 const fs = require("fs");
 const path = require("path");

@@ -169,4 +169,4 @@ class GraphStore {
   }
 }
 
-module.exports = { GraphStore };
+exports.GraphStore = GraphStore;

@@ -1,4 +1,4 @@
-// geocode.js - opt-in online address/place search via OpenStreetMap Photon. This is the
+// geocode.js - user-disableable online address/place search via OpenStreetMap Photon. This is the
 // ONLY outbound network call in the app, and it runs in the main process (never
 // the renderer, whose CSP stays connect-src 'none'). It fires only when the user
 // has turned on "Online location search"; the caller (registry) gates on that.

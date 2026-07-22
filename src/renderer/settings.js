@@ -31,6 +31,22 @@ function row(sec, label, value) {
   return r;
 }
 
+function aboutSummary() {
+  const wrap = el("div", "about-summary");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "about-logo");
+  svg.setAttribute("viewBox", "0 0 32 32");
+  svg.setAttribute("aria-label", "Orbit logo");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#orbit-mark");
+  svg.append(use);
+  wrap.append(
+    svg,
+    el("p", "about-copy", "Orbit is a local-first, encrypted relationship CRM for exploring the people, connections, and places in your network. Your contact graph stays on this device."),
+  );
+  return wrap;
+}
+
 /**
  * The owner ("you") - the person your whole network is built around. Editable
  * here (canonical home) and optionally seeded at first launch. Backed by a real
@@ -156,14 +172,14 @@ async function profileSection(body, onChanged, rerender) {
   for (const input of Object.values(inputs)) input.addEventListener("change", save);
 }
 
-/** Location autocomplete preference: local list vs. opt-in online city search. */
+/** Location autocomplete and detailed-map online preference. */
 async function locationSection(parent, signal) {
   let enabled = false;
   try {
     ({ enabled } = await api().location.online({}));
-  } catch { /* backend not loaded yet (needs an app restart); default off */ }
+  } catch { /* backend not loaded yet (needs an app restart); show unavailable */ }
   const sec = section(parent, "Location search");
-  sec.append(el("p", "dim", "Location suggestions come from a built-in city list, fully offline, and the Geomap uses a bundled vector world map. Turn this on to search OpenStreetMap for neighborhoods and full addresses as you type, and to show detailed map tiles. The location text you search and the map area you view then leave this device. Off by default."));
+  sec.append(el("p", "dim", "Detailed map tiles and address search are enabled by default. The location text you search and the map area you view are sent to the map providers; contact names and relationships are not. Turn this off to use only the bundled city list and country-outline map."));
   const toggle = el("label", "toggle-row");
   const cb = /** @type {HTMLInputElement} */ (el("input"));
   cb.type = "checkbox";
@@ -296,8 +312,12 @@ export async function renderSettings(container, opts) {
   const rerender = () => renderSettings(container, opts);
 
   let status;
+  let updateStatus;
   try {
-    status = await api().data.backupStatus({});
+    [status, updateStatus] = await Promise.all([
+      api().data.backupStatus({}),
+      api().updates.status({}),
+    ]);
   } catch (err) {
     if (controller.signal.aborted) return;
     toastError(err);
@@ -323,10 +343,39 @@ export async function renderSettings(container, opts) {
   await locationSection(left, controller.signal);
   if (controller.signal.aborted) return;
   const about = section(left, "About");
+  about.append(aboutSummary());
   row(about, "version", status.appVersion);
-  row(about, "updates", "auto-update ships with signed builds (M6); no network calls until then");
+  const updateLabels = {
+    disabled: "available in signed packaged builds",
+    idle: "automatic checks enabled",
+    checking: "checking…",
+    "up-to-date": "up to date",
+    downloading: `downloading ${updateStatus.availableVersion ?? "update"}…`,
+    ready: `${updateStatus.availableVersion ?? "update"} ready; installs on restart`,
+    blocked: "downloaded, but safety backup failed",
+    error: "last check failed",
+  };
+  row(about, "updates", updateLabels[updateStatus.phase] ?? updateStatus.phase);
+  if (updateStatus.error) about.append(el("p", "field-hint dim mono", updateStatus.error));
+  const updateBtn = el("button", null, "Check for updates");
+  updateBtn.type = "button";
+  updateBtn.disabled = !updateStatus.supported || updateStatus.phase === "checking";
+  updateBtn.addEventListener("click", async () => {
+    updateBtn.disabled = true;
+    updateBtn.textContent = "Checking…";
+    try {
+      const next = await api().updates.check({});
+      if (next.phase === "up-to-date") toast("Orbit is up to date.");
+      else if (next.availableVersion) toast(`Orbit ${next.availableVersion} is ${next.phase}.`);
+      rerender();
+    } catch (err) {
+      toastError(err);
+      rerender();
+    }
+  });
+  about.append(updateBtn);
   row(about, "log file", status.logPath);
-  row(about, "telemetry", "none - nothing leaves this device except your exports");
+  row(about, "telemetry", "none - online maps send only viewed areas and location queries");
 
   const enc = section(right, "Encryption");
   row(enc, "at rest", "AES-256 (SQLCipher), whole file");

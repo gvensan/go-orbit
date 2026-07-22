@@ -64,4 +64,4 @@ class SearchService {
   }
 }
 
-module.exports = { SearchService };
+exports.SearchService = SearchService;

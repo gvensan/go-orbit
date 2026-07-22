@@ -17,11 +17,13 @@ const KEY_FILE = "dbkey.bin";
  * @returns {string} hex key for the SQLCipher `key` pragma
  */
 function getOrCreateDbKey(userDataDir) {
-  if (!safeStorage.isEncryptionAvailable()) {
+  const insecureLinuxFallback = process.platform === "linux" &&
+    safeStorage.getSelectedStorageBackend() === "basic_text";
+  if (!safeStorage.isEncryptionAvailable() || insecureLinuxFallback) {
     // Failing closed is deliberate: a plaintext key on disk would defeat
     // encryption at rest. On Linux this usually means no secret service.
     throw new Error(
-      "OS keychain is unavailable; refusing to store the database key insecurely. " +
+      "OS keychain is unavailable or insecure; refusing to store the database key. " +
         "See docs/SECURITY_AND_THREAT_MODEL.md §4."
     );
   }

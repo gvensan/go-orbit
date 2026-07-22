@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 6
+    versioning-strategy: increase
+    groups:
+      runtime-libraries:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+      development-tooling:
+        dependency-type: development
+        update-types: ["minor", "patch"]

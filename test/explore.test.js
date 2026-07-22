@@ -7,7 +7,7 @@ const edges = require("../src/main/db/edges");
 const interactions = require("../src/main/db/interactions");
 const tagsRepo = require("../src/main/db/tags");
 const meta = require("../src/main/db/meta");
-const { ExploreService } = require("../src/main/explore/service");
+const { ExploreService, EXPLORE_SORT_KEYS } = require("../src/main/explore/service");
 const { GraphStore } = require("../src/main/graph/store");
 const { makeDb } = require("./helpers");
 
@@ -111,6 +111,22 @@ test("degree buckets and sort", (t) => {
   const degFacet = Object.fromEntries(byDegree.facets.degrees.map((f) => [f.value, f.count]));
   assert.equal(degFacet.peripheral, 4);
   assert.equal(degFacet.isolated, 0);
+});
+
+test("every Explore data column sorts, with blank values kept last", (t) => {
+  const { db } = makeDb(t);
+  const { a, b } = seed(db);
+  contacts.update(db, { id: a.id, patch: { fields: { company: "Acme", nickname: "Zulu" } } });
+  contacts.update(db, { id: b.id, patch: { fields: { company: "Acme", nickname: "Alpha" } } });
+  const s = svc(db);
+
+  for (const sort of EXPLORE_SORT_KEYS) {
+    assert.equal(s.query({ sort, dir: "asc" }).results.length, 4, `${sort} ascending failed`);
+    assert.equal(s.query({ sort, dir: "desc" }).results.length, 4, `${sort} descending failed`);
+  }
+  assert.deepEqual(s.query({ sort: "nickname", dir: "asc" }).results.slice(0, 2).map((r) => r.name), ["Bo Novak", "Alice Chen"]);
+  assert.deepEqual(s.query({ sort: "nickname", dir: "desc" }).results.slice(0, 2).map((r) => r.name), ["Alice Chen", "Bo Novak"]);
+  assert.equal(s.query({ sort: "starred" }).results[0].name, "Alice Chen");
 });
 
 test("markDirty rebuilds the index after a write", (t) => {

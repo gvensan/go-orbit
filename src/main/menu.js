@@ -21,7 +21,7 @@ function buildAppMenu(send, { isDev }) {
       ? [{
           label: app.name,
           submenu: [
-            { role: /** @type {const} */ ("about") },
+            cmd("About Orbit", "about"),
             { type: /** @type {const} */ ("separator") },
             { role: /** @type {const} */ ("hide") },
             { role: /** @type {const} */ ("hideOthers") },
@@ -53,7 +53,8 @@ function buildAppMenu(send, { isDev }) {
         { type: "separator" },
         { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
         { type: "separator" },
-        cmd("Find…", "palette", "CmdOrCtrl+K"),
+        cmd("Search Everything…", "palette", "CmdOrCtrl+K"),
+        cmd("Find in Current View…", "find-current", "CmdOrCtrl+F"),
       ],
     },
     {
@@ -61,7 +62,9 @@ function buildAppMenu(send, { isDev }) {
       submenu: [
         cmd("Graph Home", "home"),
         cmd("Full Network", "full-network"),
-        cmd("List", "list", "CmdOrCtrl+L"),
+        cmd("Geomap", "geomap"),
+        cmd("Explore", "list", "CmdOrCtrl+L"),
+        cmd("Find", "find"),
         cmd("Insights", "insights"),
         cmd("Review Duplicates", "dedup"),
         cmd("Trash", "trash"),
@@ -86,7 +89,12 @@ function buildAppMenu(send, { isDev }) {
     },
     {
       label: "Help",
-      submenu: [cmd("Keyboard Shortcuts", "shortcuts")],
+      submenu: [
+        cmd("Keyboard Shortcuts", "shortcuts"),
+        ...(process.platform === "darwin"
+          ? []
+          : [{ type: /** @type {const} */ ("separator") }, cmd("About Orbit", "about")]),
+      ],
     },
   ];
 

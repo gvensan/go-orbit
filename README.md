@@ -9,17 +9,18 @@ Target scale: **20,000 contacts, ~200,000 edges.**
 ## Quick start
 
 ```bash
-npm install          # plain install (native module on the Node ABI)
-npm run dev          # rebuild for Electron + build renderer, launch the app
+npm install          # install + force/verify the native module for Electron
+npm run dev          # verify native ABI + build renderer, launch the app
 npm run dev:watch    # dev with auto-reload (renderer edits reload, main edits restart)
-npm test             # rebuild for Node, run the unit + acceptance suite
+npm test             # run tests with Electron's embedded Node (same native ABI)
 npm run typecheck    # tsc --checkJs against the shared type contract
 npm run fixture      # (optional) seed a 20k-contact clustered test DB
 ```
 
-Requires Node ≥ 20. The dev/build commands and the test/script commands need
-different native-module ABIs (Electron vs Node); the npm pre-hooks switch
-automatically. See `docs/DECISIONS.md`.
+Requires Node 24 LTS (24.18+). The workspace consistently uses Electron's embedded Node
+ABI for the encrypted SQLite native module; tests and database scripts run
+through the same runtime so they cannot break the next app launch. See
+`docs/DECISIONS.md`.
 
 ## What to read
 
@@ -55,7 +56,7 @@ Start with **`CLAUDE.md`** (repo orientation + guardrails), then the docs:
 - **M3** Graph - ego + full-network modes, main-side layout worker with persisted positions, drag, shortest path, edge-type filters. **(done; 20k perf harness pending)**
 - **M4** Search - two-stage pipeline in a worker, typo tolerance, operators (org: tag: type: has: near: hops:), did-you-mean, recency/degree boosts, Cmd+K palette. **(done; spellfix1 evaluation pending)**
 - **M5** Intelligence - betweenness worker (cached), Louvain communities, dedup review queue with undoable merges, saved searches, scope-to-focus. **(done)**
-- **Need/Nice tier** - virtualized list view (⌘L) with bulk actions, Settings (backup status + restore-and-relaunch), first-run onboarding, trash purge + 30-day auto-purge, PNG/GraphML export, pin/unpin. **(done; minimap + path animation deliberately skipped, see DECISIONS)**
+- **Need/Nice tier** - virtualized list view (Cmd/Ctrl+L) with bulk actions, Settings (backup status + restore-and-relaunch), first-run onboarding, trash purge + 30-day auto-purge, PNG/GraphML export, and minimap. **(done; path animation deliberately skipped, see DECISIONS)**
 - **M6** Distribution & hardening - CI build matrix, signing, notarization, auto-update, app icons, 20k perf harnesses.
 
 ## Layout
@@ -68,6 +69,6 @@ src/main/      lifecycle (main.js), keys.js, config.js
 src/shared/    types.d.ts - the domain + IPC contract
 src/renderer/  UI sources, built by Vite into dist/renderer
 scripts/       generate-fixture.js, smoke-open-db.js
-test/          unit + acceptance (plain Node, no Electron needed)
+test/          unit + acceptance (Electron embedded-Node mode)
 docs/          all specifications + DECISIONS.md
 ```

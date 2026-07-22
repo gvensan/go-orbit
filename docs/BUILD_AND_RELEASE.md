@@ -12,6 +12,11 @@ cross-compiled. So each platform is built on its own OS. There is no shortcut
 around this; do not attempt Windows-from-macOS via Wine with a native module in
 the tree.
 
+The development tree also keeps one ABI: the pinned stable Electron runtime.
+`postinstall` force-rebuilds and smoke-tests the addon, while tests, migrations,
+and fixtures use Electron's embedded-Node mode. Do not rebuild the addon with
+standalone `npm rebuild`; that would replace it with an incompatible Node ABI.
+
 ## 2. Build matrix
 
 A GitHub Actions matrix, one runner per OS, each running `electron-builder`,
@@ -43,6 +48,7 @@ Secrets live in GitHub Actions encrypted secrets, never in the repo.
 - **Take a backup before applying** (`config.update.backupBeforeApply`) — an update may run migrations on next boot.
 - Surface current version + a manual "check now" in Settings.
 - Updates must be signed or they will not install; the same certs from §3.
+- Development/source runs do not initialize the updater and make no release-feed requests.
 
 ## 5. Versioning & channels
 
@@ -58,6 +64,24 @@ Secrets live in GitHub Actions encrypted secrets, never in the repo.
   artifacts for 14 days. They are validation builds, not for distribution.
 - Tagged builds are the only ones published to GitHub Releases. A tag must match
   the version in `package.json` (for example, version `0.2.0` uses tag `v0.2.0`).
+
+### Dependency currency policy
+
+- Audit direct and transitive packages before each release with `npm outdated`
+  and `npm audit`; use stable release tags only.
+- Keep direct versions exact in `package.json` and update `package-lock.json` in
+  the same change. This makes a validated combination reproducible on every OS.
+- Keep Electron on the newest stable supported major after the cross-platform
+  build/smoke matrix passes. Its embedded Node major controls `@types/node` and
+  the native SQLite ABI; a numerically newer standalone Node type package is not
+  automatically compatible.
+- Framework, graph-engine, database, or native-addon upgrades require typecheck,
+  all tests, renderer build, native ABI verification, and the encrypted startup
+  smoke test. Database changes additionally require archive round-trip,
+  migration-backup, corruption-recovery, and wrong-key tests.
+- Never accept a major update solely because it is listed by `npm outdated`.
+  Review release notes and peer/engine constraints first; document any held-back
+  package and the compatibility reason.
 
 ## 7. Acceptance criteria
 

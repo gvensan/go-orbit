@@ -187,6 +187,14 @@ export interface CentralityQuery { metric: "degree" | "betweenness"; }
 
 export interface BackupResult { path: string; createdAt: Timestamp; ok: boolean; }
 
+export interface UpdateStatus {
+  supported: boolean;
+  currentVersion: string;
+  phase: "disabled" | "idle" | "checking" | "up-to-date" | "downloading" | "ready" | "blocked" | "error";
+  availableVersion: string | null;
+  error: string | null;
+}
+
 /** Settings/diagnostics snapshot. */
 export interface AppStatus {
   appVersion: string;
@@ -241,10 +249,19 @@ export interface ExploreFilters {
   degreeBuckets?: string[];
 }
 
+export type ExploreSort =
+  | "name" | "nickname" | "gender" | "birthday" | "deceased"
+  | "email" | "phone" | "org" | "role"
+  | "location" | "city" | "county" | "state" | "postcode" | "country"
+  | "relationship" | "kin" | "degree" | "tags"
+  | "notes" | "recent" | "overdue" | "lastKind" | "lastNote"
+  | "interactionCount" | "cadenceDays" | "starred"
+  | "website" | "linkedin" | "id" | "createdAt" | "updatedAt";
+
 export interface ExploreQuery {
   text?: string;
   filters?: ExploreFilters;
-  sort?: "name" | "org" | "degree" | "recent" | "overdue";
+  sort?: ExploreSort;
   dir?: "asc" | "desc";
   limit?: number;
   scope?: "all" | "family" | "friends";
@@ -341,7 +358,7 @@ export interface FindCondition {
 export interface FindQuery {
   match?: "all" | "any";
   conditions?: FindCondition[];
-  sort?: "name" | "org" | "degree" | "recent" | "overdue";
+  sort?: ExploreSort;
   dir?: "asc" | "desc";
   limit?: number;
 }
@@ -459,7 +476,7 @@ export interface IpcContract {
   "graph:ego": { request: EgoQuery; response: number[] };
   "graph:path": { request: PathQuery; response: PathResult };
   "graph:centrality": { request: CentralityQuery; response: Record<number, number> };
-  "graph:layoutStart": { request: {}; response: { running: boolean } };
+  "graph:layoutStart": { request: { reset?: boolean }; response: { running: boolean } };
   "graph:layoutStop": { request: {}; response: { running: boolean } };
   "graph:savePositions": {
     request: { positions: Record<number, { x: number; y: number }> };
@@ -472,6 +489,8 @@ export interface IpcContract {
   "search:query": { request: SearchQuery; response: SearchResponse };
 
   "backup:now": { request: {}; response: BackupResult };
+  "update:status": { request: {}; response: UpdateStatus };
+  "update:check": { request: {}; response: UpdateStatus };
   "backup:status": { request: {}; response: AppStatus };
   /** Wipe ALL data for a fresh start (a safety backup is taken first). */
   "data:clearAll": { request: {}; response: { contacts: number } };
@@ -609,6 +628,10 @@ export interface RendererApi {
   app: {
     /** Native menu command ids; returns an unsubscribe fn. */
     onMenu: (cb: (id: string) => void) => () => void;
+  };
+  updates: {
+    status: Call<"update:status">;
+    check: Call<"update:check">;
   };
   dedup: {
     candidates: Call<"dedup:candidates">;

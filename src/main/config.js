@@ -111,17 +111,19 @@ module.exports = {
     maxContacts: 20000,         // hard cap accepted over IPC
   },
 
-  // Online location autocomplete (opt-in, default off). The fetch happens in the
+  // Online location autocomplete and detailed maps. Enabled by default; the
+  // user can explicitly disable both with one preference. Fetches happen in the
   // MAIN process so the renderer keeps connect-src 'none'. OpenStreetMap Photon:
   // free, no API key, built for as-you-type city search.
   location: {
+    onlineDefault: true,
     photonUrl: "https://photon.komoot.io/api/",
     limit: 8,
     minChars: 2,
     timeoutMs: 4000,
   },
 
-  // Online map tiles (opt-in, rides the same "location.online" consent). Fetched
+  // Online map tiles ride the same "location.online" preference. Fetched
   // in the MAIN process and handed to the renderer as data: URLs, so the renderer
   // keeps connect-src 'none'. Cached on disk to be polite to OSM's tile servers
   // and to keep pan/zoom snappy offline once tiles are seen.
@@ -151,6 +153,7 @@ module.exports = {
   update: {
     enabled: true,
     // GitHub Releases feed is wired in electron-builder.yml (publish).
+    intervalMs: 6 * 60 * 60 * 1000,
     backupBeforeApply: true,
   },
 };

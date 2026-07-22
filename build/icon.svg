@@ -23,16 +23,16 @@
     <ellipse cx="512" cy="512" rx="372" ry="156" fill="none" stroke="#33507e" stroke-width="10" opacity="0.85"/>
     <!-- contacts (gender-ring colours from the app) -->
     <g>
-      <circle cx="866" cy="566" r="46" fill="#2a3a5c"/>
-      <circle cx="866" cy="566" r="46" fill="none" stroke="#ff2d95" stroke-width="9"/>
+      <circle cx="866" cy="566" r="40" fill="#2a3a5c"/>
+      <circle cx="866" cy="566" r="40" fill="none" stroke="#ff2d95" stroke-width="8"/>
     </g>
     <g>
-      <circle cx="196" cy="576" r="38" fill="#2a3a5c"/>
-      <circle cx="196" cy="576" r="38" fill="none" stroke="#00c2ff" stroke-width="8"/>
+      <circle cx="196" cy="576" r="40" fill="#2a3a5c"/>
+      <circle cx="196" cy="576" r="40" fill="none" stroke="#00c2ff" stroke-width="8"/>
     </g>
     <g>
-      <circle cx="430" cy="372" r="30" fill="#2a3a5c"/>
-      <circle cx="430" cy="372" r="30" fill="none" stroke="#3f9d76" stroke-width="7"/>
+      <circle cx="430" cy="372" r="40" fill="#2a3a5c"/>
+      <circle cx="430" cy="372" r="40" fill="none" stroke="#3f9d76" stroke-width="8"/>
     </g>
   </g>
 

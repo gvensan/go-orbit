@@ -11,6 +11,7 @@
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require("electron");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const log = require("electron-log/main");
 const config = require("./config");
@@ -25,6 +26,7 @@ const { registerIpc } = require("./ipc/registry");
 const { getOrCreateDbKey } = require("./keys");
 const { buildAppMenu } = require("./menu");
 const { SearchService } = require("./search/service");
+const { createUpdater } = require("./updater");
 
 // NOTE: no app.setName() here. On macOS, safeStorage's keychain entry is
 // derived from the app name, so renaming orphans the encrypted DB key; and
@@ -41,6 +43,7 @@ const runtime = {
   /** @type {ExploreService | null} */ explore: null,
   /** @type {NodeJS.Timeout | null} */ backupTimer: null,
   /** @type {BrowserWindow | null} */ window: null,
+  /** @type {ReturnType<typeof createUpdater> | null} */ updater: null,
   key: "",
   backupDir: "",
 };
@@ -52,6 +55,36 @@ const trustedContents = new Set();
 const grantedPaths = new Set();
 
 let shuttingDown = false; // teardown re-entrancy guard
+const packagedSmokeTest = process.env.ORBIT_PACKAGED_SMOKE === "1";
+
+/** CI-only packaged-app probe. It exercises Electron's native SQLite binary,
+ * migrations, encryption, and a write in a disposable directory, without
+ * opening the user's profile or weakening production key storage. */
+function runPackagedSmokeTest() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orbit-packaged-smoke-"));
+  let db = null;
+  try {
+    db = dbLayer.openDatabase({
+      dbPath: path.join(dir, "smoke.db"),
+      backupDir: path.join(dir, "backups"),
+      key: "orbit-packaged-smoke-key",
+    });
+    contactsRepo.create(db, { name: "Packaged Smoke" });
+    const row = /** @type {{ n: number }} */ (db.prepare("SELECT COUNT(*) AS n FROM contacts WHERE deleted_at IS NULL").get());
+    const count = row.n;
+    if (count !== 1) throw new Error(`expected one contact, found ${count}`);
+    dbLayer.checkpointAndClose(db);
+    db = null;
+    console.log("[packaged-smoke] OK - encrypted database opened, migrated, and written");
+    app.exit(0);
+  } catch (err) {
+    try { db?.close(); } catch {}
+    console.error("[packaged-smoke] FAILED:", err);
+    app.exit(1);
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 // ===========================================================================
 // COMPONENT: window (UI) - created last, after the data layer is ready
@@ -197,6 +230,8 @@ function boot() {
       logPath: log.transports.file.getFile().path,
       restoreLatestAndRelaunch: () => restoreLatestAndRelaunch(dbPath),
       restoreSnapshotAndRelaunch: (file) => restoreSnapshotAndRelaunch(dbPath, file),
+      updateStatus: () => runtime.updater?.status(),
+      updateCheck: () => runtime.updater?.check(),
       dialog: {
         openFile: async ({ filters }) => {
           const r = await dialog.showOpenDialog(runtime.window, {
@@ -224,6 +259,13 @@ function boot() {
     }
   );
   runtime.window = createWindow();                                // 6. UI last
+  runtime.updater = createUpdater({
+    db: runtime.db,
+    backupDir: runtime.backupDir,
+    key: runtime.key,
+    log,
+  });
+  runtime.updater.start();
   Menu.setApplicationMenu(
     buildAppMenu(
       (id) => {
@@ -314,6 +356,8 @@ function teardown() {
     clearInterval(runtime.backupTimer);
     runtime.backupTimer = null;
   }
+  runtime.updater?.stop();
+  runtime.updater = null;
   if (runtime.search) {
     runtime.search.terminate().catch(() => {}); // best-effort; dies with the process anyway
     runtime.search = null;
@@ -360,7 +404,7 @@ app.on("web-contents-created", (_e, contents) => {
 // ===========================================================================
 
 // Single-instance lock: two processes on one SQLite file can corrupt it.
-if (!app.requestSingleInstanceLock()) {
+if (!packagedSmokeTest && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
@@ -371,6 +415,10 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    if (packagedSmokeTest) {
+      runPackagedSmokeTest();
+      return;
+    }
     // The renderer never legitimately needs a Chromium permission (geolocation,
     // media, notifications, ...): local content only. Deny them all.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -385,6 +433,9 @@ if (!app.requestSingleInstanceLock()) {
         applicationVersion: app.getVersion(),
         version: "",
         copyright: "© Orbit",
+        credits: "A local-first, encrypted relationship CRM for exploring the people, connections, and places in your network.",
+        authors: ["Orbit"],
+        website: "https://github.com/gvensan/orbit-graph",
         iconPath,
       });
     } catch { /* about panel is cosmetic */ }
@@ -403,7 +454,7 @@ if (!app.requestSingleInstanceLock()) {
       log.error("[boot] FAILED:", err);
       dialog.showErrorBox(
         "Orbit could not start",
-        `${err.message}\n\nYour data has not been modified. See the log for details.`
+        `${err.message}\n\nYour database was left in place. See the log for details.`
       );
       app.quit();
     }

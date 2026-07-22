@@ -42,7 +42,7 @@ editable flexible fields with add-field. Center: the contact's ego-network
 meeting) and tags. Actions: edit, add relationship, merge, soft-delete. Edits
 are optimistic with save-on-blur; deletes route to Trash, never hard-delete.
 
-**List / table view.** Virtualized rows (20k must scroll smoothly), sortable
+**List / table view.** Virtualized rows (20k must scroll smoothly), every data column sortable
 columns, the same filter facets as search (org, tag, edge type, has-email).
 Multi-select for bulk tag / export-subset (subset export is Nice-tier) / delete.
 Every user-configurable data table follows the Explore column model: visibility,

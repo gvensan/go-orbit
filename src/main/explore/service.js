@@ -13,6 +13,13 @@ const meta = require("../db/meta");
 const { parseQuery } = require("../search/engine");
 
 const STATUS_KEYS = ["starred", "overdue", "dormant", "hasEmail", "hasPhone"];
+const EXPLORE_SORT_KEYS = [
+  "name", "nickname", "gender", "birthday", "deceased", "email", "phone", "org", "role",
+  "location", "city", "county", "state", "postcode", "country", "relationship", "kin",
+  "degree", "tags", "notes", "recent", "overdue", "lastKind", "lastNote", "interactionCount",
+  "cadenceDays", "starred", "website", "linkedin", "id", "createdAt", "updatedAt",
+];
+const DESC_SORTS = new Set(["degree", "recent", "overdue", "deceased", "interactionCount", "starred", "createdAt", "updatedAt"]);
 
 class ExploreService {
   /** @param {{ db: any, graph: import('../graph/store').GraphStore }} ctx */
@@ -521,17 +528,56 @@ class ExploreService {
   }
 
   sortRows(rows, sort, dir) {
-    const by = {
-      name: (a, b) => a.name.localeCompare(b.name),
-      org: (a, b) => (a.org || "￿").localeCompare(b.org || "￿") || a.name.localeCompare(b.name),
-      degree: (a, b) => b.degree - a.degree || a.name.localeCompare(b.name),
-      recent: (a, b) => (b.lastAt ?? -1) - (a.lastAt ?? -1) || a.name.localeCompare(b.name),
-      overdue: (a, b) => overdueDays(b) - overdueDays(a) || a.name.localeCompare(b.name),
+    const value = {
+      name: (r) => r.name,
+      nickname: (r) => r.nickname,
+      gender: (r) => r.gender,
+      birthday: (r) => r.birthday,
+      deceased: (r) => r.deceased,
+      email: (r) => r.email,
+      phone: (r) => r.phone,
+      org: (r) => r.org,
+      role: (r) => r.role,
+      location: (r) => r.location,
+      city: (r) => r.city,
+      county: (r) => r.county,
+      state: (r) => r.state,
+      postcode: (r) => r.postcode,
+      country: (r) => r.country,
+      relationship: (r) => [...r.edgeTypes].sort().join(", "),
+      kin: (r) => r.kin,
+      degree: (r) => r.degree,
+      tags: (r) => [...r.tags].sort().join(", "),
+      notes: (r) => r.notes,
+      recent: (r) => r.lastAt,
+      overdue: (r) => r.overdue ? overdueDays(r) : null,
+      lastKind: (r) => r.lastKind,
+      lastNote: (r) => r.lastNote,
+      interactionCount: (r) => r.interactionCount,
+      cadenceDays: (r) => r.cadenceDays,
+      starred: (r) => r.starred,
+      website: (r) => r.website,
+      linkedin: (r) => r.linkedin,
+      id: (r) => r.id,
+      createdAt: (r) => r.createdAt,
+      updatedAt: (r) => r.updatedAt,
     };
-    const natural = sort === "name" || sort === "org" ? "asc" : "desc";
-    const out = [...rows].sort(by[sort] ?? by.name);
-    if (dir && dir !== natural) out.reverse();
-    return out;
+    const get = value[sort] ?? value.name;
+    const direction = dir ?? (DESC_SORTS.has(sort) ? "desc" : "asc");
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+    const missing = (v) => v == null || v === "";
+    return [...rows].sort((a, b) => {
+      const av = get(a), bv = get(b);
+      if (missing(av) !== missing(bv)) return missing(av) ? 1 : -1; // blanks stay last in both directions
+      let compared = 0;
+      if (!missing(av)) {
+        compared = typeof av === "number" || typeof av === "boolean"
+          ? Number(av) - Number(bv)
+          : collator.compare(String(av), String(bv));
+        if (direction === "desc") compared *= -1;
+      }
+      return compared || collator.compare(a.name, b.name) || a.id - b.id;
+    });
   }
 }
 
@@ -542,4 +588,6 @@ const overdueDays = (r) => {
   return (Date.now() - dueAt) / 86400000;
 };
 
-module.exports = { ExploreService, STATUS_KEYS };
+exports.ExploreService = ExploreService;
+exports.STATUS_KEYS = STATUS_KEYS;
+exports.EXPLORE_SORT_KEYS = EXPLORE_SORT_KEYS;

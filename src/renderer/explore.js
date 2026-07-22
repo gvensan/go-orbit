@@ -51,7 +51,7 @@ const dateCell = (value) => textCell(value ? fmtDate(value) : "—", "mono dim")
 
 // Column model. `base` columns always show; the rest appear when their facet is
 // active (requirement: selecting a facet reveals its column). `sort` is the
-// backend sort key, if the column is sortable.
+// backend sort key. Every data column is sortable.
 const COLUMNS = [
   { key: "name", label: "Name", group: "Identity", sort: "name", base: true, w: 230, min: 140,
     render: (r, view) => {
@@ -70,38 +70,41 @@ const COLUMNS = [
       if (r.overdue) c.append(el("span", "xp-pill overdue", "overdue"));
       return c;
     } },
-  { key: "nickname", label: "Nickname", group: "Identity", w: 120, min: 80, render: (r) => textCell(r.nickname) },
-  { key: "gender", label: "Gender", group: "Identity", w: 90, min: 60, render: (r) => textCell(r.gender) },
-  { key: "birthday", label: "Birthday", group: "Identity", w: 110, min: 90, render: (r) => dateCell(r.birthday) },
-  { key: "deceased", label: "Deceased", group: "Identity", w: 86, min: 70, render: (r) => boolCell(r.deceased) },
-  { key: "email", label: "Email", group: "Contact", facet: (f) => f.status.includes("hasEmail"), w: 200, min: 120, render: (r) => textCell(r.email, "mono dim") },
-  { key: "phone", label: "Phone", group: "Contact", facet: (f) => f.status.includes("hasPhone"), w: 150, min: 100, render: (r) => textCell(r.phone, "mono dim") },
+  { key: "nickname", label: "Nickname", group: "Identity", sort: "nickname", w: 120, min: 80, render: (r) => textCell(r.nickname) },
+  { key: "gender", label: "Gender", group: "Identity", sort: "gender", w: 90, min: 60, render: (r) => textCell(r.gender) },
+  { key: "birthday", label: "Birthday", group: "Identity", sort: "birthday", w: 110, min: 90, render: (r) => dateCell(r.birthday) },
+  { key: "deceased", label: "Deceased", group: "Identity", sort: "deceased", w: 86, min: 70, render: (r) => boolCell(r.deceased) },
+  { key: "email", label: "Email", group: "Contact", sort: "email", facet: (f) => f.status.includes("hasEmail"), w: 200, min: 120, render: (r) => textCell(r.email, "mono dim") },
+  { key: "phone", label: "Phone", group: "Contact", sort: "phone", facet: (f) => f.status.includes("hasPhone"), w: 150, min: 100, render: (r) => textCell(r.phone, "mono dim") },
   { key: "org", label: "Company", group: "Work", sort: "org", base: true, w: 170, min: 100, render: (r) => textCell(r.org) },
-  { key: "role", label: "Role", group: "Work", w: 150, min: 90, render: (r) => textCell(r.role) },
-  { key: "location", label: "Location entered", group: "Location", w: 190, min: 110, render: (r) => textCell(r.location) },
-  { key: "city", label: "City", group: "Location", w: 130, min: 85, render: (r) => textCell(r.city) },
-  { key: "county", label: "County", group: "Location", w: 130, min: 85, render: (r) => textCell(r.county) },
-  { key: "state", label: "State / region", group: "Location", w: 140, min: 90, render: (r) => textCell(r.state) },
-  { key: "postcode", label: "Postcode", group: "Location", w: 100, min: 75, render: (r) => textCell(r.postcode, "mono dim") },
-  { key: "country", label: "Country", group: "Location", w: 130, min: 85, render: (r) => textCell(r.country) },
-  { key: "relationship", label: "Relationships", group: "Network", facet: (f) => f.edgeTypes.length > 0, w: 170, min: 100, render: (r) => textCell((r.types ?? []).join(", ")) },
-  { key: "kin", label: "Kinship", group: "Network", w: 120, min: 80, render: (r) => textCell(r.kin) },
+  { key: "role", label: "Role", group: "Work", sort: "role", w: 150, min: 90, render: (r) => textCell(r.role) },
+  { key: "location", label: "Location entered", group: "Location", sort: "location", w: 190, min: 110, render: (r) => textCell(r.location) },
+  { key: "city", label: "City", group: "Location", sort: "city", w: 130, min: 85, render: (r) => textCell(r.city) },
+  { key: "county", label: "County", group: "Location", sort: "county", w: 130, min: 85, render: (r) => textCell(r.county) },
+  { key: "state", label: "State / region", group: "Location", sort: "state", w: 140, min: 90, render: (r) => textCell(r.state) },
+  { key: "postcode", label: "Postcode", group: "Location", sort: "postcode", w: 100, min: 75, render: (r) => textCell(r.postcode, "mono dim") },
+  { key: "country", label: "Country", group: "Location", sort: "country", w: 130, min: 85, render: (r) => textCell(r.country) },
+  { key: "relationship", label: "Relationships", group: "Network", sort: "relationship", facet: (f) => f.edgeTypes.length > 0, w: 170, min: 100, render: (r) => textCell((r.types ?? []).join(", ")) },
+  { key: "kin", label: "Kinship", group: "Network", sort: "kin", w: 120, min: 80, render: (r) => textCell(r.kin) },
   { key: "degree", label: "Connections", group: "Network", sort: "degree", base: true, w: 92, min: 70, render: (r) => textCell(r.degree, "mono dim") },
-  { key: "tags", label: "Tags", group: "Network", base: true, w: 170, min: 90,
+  { key: "tags", label: "Tags", group: "Network", sort: "tags", base: true, w: 170, min: 90,
     render: renderTags },
-  { key: "notes", label: "Notes", group: "Activity", w: 240, min: 120, render: (r) => textCell(r.notes) },
+  { key: "notes", label: "Notes", group: "Activity", sort: "notes", w: 240, min: 120, render: (r) => textCell(r.notes) },
   { key: "last", label: "Last interaction", group: "Activity", sort: "recent", base: true, w: 110, min: 82, render: (r) => textCell(fmtLast(r.lastAt), "mono dim") },
-  { key: "lastKind", label: "Last type", group: "Activity", w: 90, min: 70, render: (r) => textCell(r.lastKind) },
-  { key: "lastNote", label: "Last interaction note", group: "Activity", w: 220, min: 120, render: (r) => textCell(r.lastNote) },
-  { key: "interactionCount", label: "Interactions", group: "Activity", w: 90, min: 70, render: (r) => textCell(r.interactionCount, "mono dim") },
-  { key: "cadenceDays", label: "Cadence", group: "Activity", w: 90, min: 70, render: (r) => textCell(r.cadenceDays ? `${r.cadenceDays}d` : "—", "mono dim") },
-  { key: "starred", label: "Starred", group: "Activity", w: 76, min: 60, render: (r) => boolCell(r.starred, "★") },
-  { key: "website", label: "Website", group: "Web", w: 190, min: 110, render: (r) => textCell(r.website, "mono dim") },
-  { key: "linkedin", label: "LinkedIn", group: "Web", w: 190, min: 110, render: (r) => textCell(r.linkedin, "mono dim") },
-  { key: "id", label: "ID", group: "System", w: 64, min: 50, render: (r) => textCell(r.id, "mono dim") },
-  { key: "createdAt", label: "Created", group: "System", w: 120, min: 90, render: (r) => dateCell(r.createdAt) },
-  { key: "updatedAt", label: "Updated", group: "System", w: 120, min: 90, render: (r) => dateCell(r.updatedAt) },
+  { key: "lastKind", label: "Last type", group: "Activity", sort: "lastKind", w: 90, min: 70, render: (r) => textCell(r.lastKind) },
+  { key: "lastNote", label: "Last interaction note", group: "Activity", sort: "lastNote", w: 220, min: 120, render: (r) => textCell(r.lastNote) },
+  { key: "interactionCount", label: "Interactions", group: "Activity", sort: "interactionCount", w: 90, min: 70, render: (r) => textCell(r.interactionCount, "mono dim") },
+  { key: "cadenceDays", label: "Cadence", group: "Activity", sort: "cadenceDays", w: 90, min: 70, render: (r) => textCell(r.cadenceDays ? `${r.cadenceDays}d` : "—", "mono dim") },
+  { key: "starred", label: "Starred", group: "Activity", sort: "starred", w: 76, min: 60, render: (r) => boolCell(r.starred, "★") },
+  { key: "website", label: "Website", group: "Web", sort: "website", w: 190, min: 110, render: (r) => textCell(r.website, "mono dim") },
+  { key: "linkedin", label: "LinkedIn", group: "Web", sort: "linkedin", w: 190, min: 110, render: (r) => textCell(r.linkedin, "mono dim") },
+  { key: "id", label: "ID", group: "System", sort: "id", w: 64, min: 50, render: (r) => textCell(r.id, "mono dim") },
+  { key: "createdAt", label: "Created", group: "System", sort: "createdAt", w: 120, min: 90, render: (r) => dateCell(r.createdAt) },
+  { key: "updatedAt", label: "Updated", group: "System", sort: "updatedAt", w: 120, min: 90, render: (r) => dateCell(r.updatedAt) },
 ];
+
+const DESC_SORTS = new Set(["degree", "recent", "overdue", "deceased", "interactionCount", "starred", "createdAt", "updatedAt"]);
+const naturalSortDirection = (sort) => DESC_SORTS.has(sort) ? "desc" : "asc";
 
 const fmtLast = (ts) => {
   if (!ts) return "—";
@@ -126,7 +129,7 @@ export class ExploreView {
     this.state = {
       text: "",
       filters: { orgs: [], tags: [], edgeTypes: [], status: [], degreeBuckets: [] },
-      sort: /** @type {"name"|"org"|"degree"|"recent"|"overdue"} */ ("name"),
+      sort: /** @type {import("../shared/types").ExploreSort} */ ("name"),
       dir: /** @type {"asc"|"desc"} */ ("asc"),
       exclude: /** @type {{ hasEmail?: boolean }} */ ({}),
       scope: /** @type {"all"|"family"|"friends"} */ ("all"),
@@ -302,7 +305,7 @@ export class ExploreView {
       ...structuredCloneLite(seg.filters),
     };
     this.state.sort = /** @type {any} */ (seg.sort ?? "name");
-    this.state.dir = this.state.sort === "name" || this.state.sort === "org" ? "asc" : "desc";
+    this.state.dir = naturalSortDirection(this.state.sort);
     this.state.text = "";
     this.state.exclude = seg.exclude ?? {};
     this.input.value = "";
@@ -433,7 +436,7 @@ export class ExploreView {
   }
 
   sortBy(col) {
-    const natural = col.sort === "name" || col.sort === "org" ? "asc" : "desc";
+    const natural = naturalSortDirection(col.sort);
     if (this.state.sort === col.sort) {
       this.state.dir = this.state.dir === "asc" ? "desc" : "asc";
     } else {
@@ -642,6 +645,7 @@ export class ExploreView {
     const rows = this.lastResponse?.results ?? [];
     if (this.state.scope !== "family") return rows;
     const byId = new Map(rows.map((r) => [r.id, r]));
+    const resultOrder = new Map(rows.map((r, index) => [r.id, index]));
     const children = new Map(), roots = [];
     for (const r of rows) {
       if (r.familyParentId != null && byId.has(r.familyParentId)) {
@@ -649,12 +653,11 @@ export class ExploreView {
         children.get(r.familyParentId).push(r);
       } else roots.push(r);
     }
-    const rank = (r) => {
-      const order = ["spouse", "wife", "husband", "parent", "mother", "father", "sibling", "sister", "brother", "child", "daughter", "son", "grandparent", "grandmother", "grandfather", "grandchild", "granddaughter", "grandson", "aunt", "uncle", "niece", "nephew", "cousin"];
-      const i = order.indexOf(String(r.kin || "").toLowerCase());
-      return i < 0 ? 999 : i;
-    };
-    const sort = (list) => list.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || rank(a) - rank(b) || a.name.localeCompare(b.name));
+    // The service has already sorted the full result set by the selected
+    // column. Preserve the family tree shape, but use that order for roots and
+    // siblings so every header still has a visible sorting effect.
+    const sort = (list) => list.sort((a, b) =>
+      Number(b.isOwner) - Number(a.isOwner) || resultOrder.get(a.id) - resultOrder.get(b.id));
     const out = [], seen = new Set();
     const visit = (r, depth) => {
       if (seen.has(r.id)) return;

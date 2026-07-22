@@ -54,4 +54,4 @@ class CentralityService {
   }
 }
 
-module.exports = { CentralityService };
+exports.CentralityService = CentralityService;

@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     outDir: "../../dist/renderer",
     emptyOutDir: true,
-    target: "chrome126", // Electron 31
+    target: "chrome150", // Electron 43
     commonjsOptions: {
       // The main/shared trees are CommonJS (per CLAUDE.md) but the renderer
       // bundles config.js (single-source tunables) and shared helpers.

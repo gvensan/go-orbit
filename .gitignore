@@ -10,6 +10,7 @@ coverage/
 # Local dev data (dev DB, keys, recovery snapshots) - user data, never commit
 .dev/
 .recovery-*/
+recovery/
 backups/
 *.db
 *.db-wal

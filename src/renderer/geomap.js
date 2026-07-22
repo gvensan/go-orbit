@@ -1,6 +1,6 @@
 // geomap.js - world map of contact locations, Web Mercator (the projection real
 // slippy maps use). Two base layers over one shared pan/zoom model:
-//   - online + opted-in: OpenStreetMap raster tiles, fetched in the MAIN process
+//   - online + enabled: OpenStreetMap raster tiles, fetched in the MAIN process
 //     and drawn as data: URLs (renderer stays connect-src 'none').
 //   - offline / opted-out: a bundled 50m vector world (no network at all).
 // Dots project the same way in both, so zoom/pan/hover/click are identical.
@@ -8,6 +8,7 @@
 import { feature } from "topojson-client";
 import Supercluster from "supercluster";
 import worldTopo from "world-atlas/countries-50m.json";
+import { unwrapRing } from "./map-geometry.mjs";
 
 // Country outlines (offline, bundled): TopoJSON -> GeoJSON once at load.
 const WORLD = feature(worldTopo, worldTopo.objects.countries);
@@ -38,10 +39,11 @@ export class GeoMap {
     this.locationGroups = new Map();
     this.clusterIndex = null;
     this.hoveredKey = null;
+    this.popupKey = null;
     this.zoom = 2;                  // fractional web-mercator zoom
     this.origin = { px: 0, py: 0 }; // world-pixel coordinate at the pane's top-left
     this.dragging = null;
-    this.suppressClick = false;     // mouseup clears dragging before click fires
+    this.suppressClick = false;     // pointerup clears dragging before click fires
     this.tiles = false;             // tile base layer active (online + opted-in)
     /** @type {Map<string, HTMLImageElement | "loading" | "error">} */
     this.tileCache = new Map();
@@ -102,13 +104,18 @@ export class GeoMap {
       const dz = -e.deltaY * (e.ctrlKey ? 0.03 : 0.003);
       this.zoomAt(e.offsetX, e.offsetY, dz);
     }, { passive: false, signal });
-    c.addEventListener("mousedown", (e) => {
+    c.addEventListener("pointerdown", (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
       this.suppressClick = false;
       this.hidePopup();
-      this.dragging = { x: e.clientX, y: e.clientY, moved: false };
+      this.dragging = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+      c.setPointerCapture(e.pointerId);
     }, { signal });
-    window.addEventListener("mousemove", (e) => {
-      if (!this.dragging) return;
+    c.addEventListener("pointermove", (e) => {
+      if (!this.dragging || this.dragging.pointerId !== e.pointerId) {
+        if (!this.dragging && e.pointerType === "mouse") this.onHover(e.offsetX, e.offsetY);
+        return;
+      }
       const dx = e.clientX - this.dragging.x, dy = e.clientY - this.dragging.y;
       if (Math.abs(dx) + Math.abs(dy) > 2) this.dragging.moved = true;
       this.origin.px -= dx; this.origin.py -= dy;
@@ -116,12 +123,14 @@ export class GeoMap {
       this.clampView();
       this.render();
     }, { signal });
-    window.addEventListener("mouseup", () => {
+    const endDrag = (e) => {
+      if (!this.dragging || this.dragging.pointerId !== e.pointerId) return;
       if (this.dragging?.moved) this.suppressClick = true;
       this.dragging = null;
-    }, { signal });
-    c.addEventListener("mousemove", (e) => this.onHover(e.offsetX, e.offsetY), { signal });
-    c.addEventListener("mouseleave", () => { this.hoveredKey = null; this.tip.hidden = true; this.render(); }, { signal });
+    };
+    c.addEventListener("pointerup", endDrag, { signal });
+    c.addEventListener("pointercancel", endDrag, { signal });
+    c.addEventListener("pointerleave", () => { if (!this.dragging) { this.hoveredKey = null; this.tip.hidden = true; this.render(); } }, { signal });
     c.addEventListener("click", (e) => {
       if (this.suppressClick) { this.suppressClick = false; return; }
       if (e.detail > 1) return;
@@ -148,7 +157,7 @@ export class GeoMap {
     }, { signal });
   }
 
-  /** Is the online tile layer available right now? (opt-in AND actually online) */
+  /** Is the online tile layer enabled and available right now? */
   async syncMode() {
     let enabled = false;
     try { ({ enabled } = await window.api.location.online({})); } catch { /* backend not up yet */ }
@@ -362,9 +371,19 @@ export class GeoMap {
 
   onHover(px, py) {
     const hit = this.hit(px, py);
+    // A marker can have either its transient hover tip or its interactive
+    // popup open, never both. Moving to a different marker replaces whichever
+    // map overlay was open before it.
+    if (!this.popup.hidden) {
+      if (hit?.key === this.popupKey) {
+        this.hideTip();
+        return;
+      }
+      if (hit) this.hidePopup();
+    }
     if ((hit?.key ?? null) === this.hoveredKey) { if (hit) this.moveTip(px, py); return; }
     this.hoveredKey = hit?.key ?? null;
-    if (!hit) { this.tip.hidden = true; this.render(); return; }
+    if (!hit) { this.hideTip(); this.render(); return; }
     this.tip.innerHTML = "";
     if (hit.kind === "cluster") {
       const t = document.createElement("div"); t.className = "geomap-tip-loc";
@@ -399,7 +418,9 @@ export class GeoMap {
   }
 
   showLocationPopup(marker, px, py) {
+    this.hideTip();
     this.popup.innerHTML = "";
+    this.popupKey = marker.key;
     const first = marker.points[0];
     const head = document.createElement("div"); head.className = "geomap-popup-head";
     const precision = first.locationPrecision ? ` · ${first.locationPrecision}-level` : "";
@@ -435,30 +456,57 @@ export class GeoMap {
     const { w, h } = this.dims(), pw = this.popup.offsetWidth, ph = this.popup.offsetHeight;
     this.popup.style.left = `${clamp(px + 14, 8, Math.max(8, w - pw - 8))}px`;
     this.popup.style.top = `${clamp(py + 12, 8, Math.max(8, h - ph - 8))}px`;
+    this.render(); // clear the hover ring now that the interactive popup owns the marker
   }
 
-  hidePopup() { this.popup.hidden = true; }
+  hideTip() {
+    this.hoveredKey = null;
+    this.tip.hidden = true;
+  }
+
+  hidePopup() {
+    this.popup.hidden = true;
+    this.popupKey = null;
+  }
 
   // --- base layers ---
   drawLand(ctx, th) {
     ctx.fillStyle = th.land;
     ctx.strokeStyle = th.landStroke;
     ctx.lineWidth = 0.5;
-    const ring = (coords) => {
-      ctx.beginPath();
-      for (let i = 0; i < coords.length; i++) {
-        const p = this.project(coords[i][0], coords[i][1]);
-        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    const { w } = this.dims();
+
+    // GeoJSON uses a discontinuity at the antimeridian. Connecting +180 to
+    // -180 in screen space draws a line across the whole map, then fills a
+    // giant rectangle (most visibly through Russia). Unwrap every ring into a
+    // continuous longitude range and render the relevant world copy instead.
+    const polygon = (coords) => {
+      if (!coords.length) return;
+      const outer = unwrapRing(coords[0]);
+      const outerXs = outer.map((p) => p[0]);
+      const centre = (Math.min(...outerXs) + Math.max(...outerXs)) / 2;
+      const rings = [outer, ...coords.slice(1).map((r) => unwrapRing(r, centre))];
+      for (const worldOffset of [-360, 0, 360]) {
+        const left = this.project(Math.min(...outerXs) + worldOffset, 0).x;
+        const right = this.project(Math.max(...outerXs) + worldOffset, 0).x;
+        if (right < 0 || left > w) continue;
+        ctx.beginPath();
+        for (const ring of rings) {
+          for (let i = 0; i < ring.length; i++) {
+            const p = this.project(ring[i][0] + worldOffset, ring[i][1]);
+            i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+          }
+          ctx.closePath();
+        }
+        ctx.fill("evenodd"); // preserve lakes and other interior holes
+        if (!this.tiles) ctx.stroke(); // under tiles the vector is just a loading base
       }
-      ctx.closePath();
-      ctx.fill();
-      if (!this.tiles) ctx.stroke(); // under tiles the vector is just a loading base
     };
     for (const f of WORLD.features) {
       const g = f.geometry;
       if (!g) continue;
-      if (g.type === "Polygon") for (const r of g.coordinates) ring(r);
-      else if (g.type === "MultiPolygon") for (const poly of g.coordinates) for (const r of poly) ring(r);
+      if (g.type === "Polygon") polygon(g.coordinates);
+      else if (g.type === "MultiPolygon") for (const poly of g.coordinates) polygon(poly);
     }
   }
 

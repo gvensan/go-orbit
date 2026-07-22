@@ -17,7 +17,9 @@ for (const e of edges) {
   if (graph.hasNode(e.source) && graph.hasNode(e.target)) graph.addEdge(e.source, e.target);
 }
 
-const settings = forceAtlas2.inferSettings(graph);
+// Collision-aware spacing is important here because these settled positions
+// are persisted and become the default full-network presentation.
+const settings = { ...forceAtlas2.inferSettings(graph), adjustSizes: true };
 const collect = () => {
   const positions = {};
   graph.forEachNode((id, attrs) => {

@@ -34,8 +34,9 @@ which thread:
 | `explore:*`, `find:query` | query, fieldValues | main (in-memory index) | faceted people-search over `ExploreService` rows, rebuilt on `markDirty()` |
 | `insights:*` | summary, extended, breakdown | main | network stats, overdue/dormant, breakdowns |
 | `searches:*` | list, save, delete | main, sync | saved searches (`kind` text or find) |
-| `location:*`, `map:tile` | search, online, setOnline, backfill | main (fetch) | **opt-in online** geocoding + OSM tiles, gated on the `location.online` meta flag; the renderer never touches the network (`connect-src 'none'`), tiles return as `data:` URLs |
+| `location:*`, `map:tile` | search, online, setOnline, backfill | main (fetch) | Online geocoding + OSM tiles are enabled by default and user-disableable via `location.online`; the renderer never touches the network (`connect-src 'none'`), tiles return as `data:` URLs |
 | `backup:*` | now, status, list, restoreLatest, restore | main, sync | `VACUUM INTO` + verify + rotate; restore relaunches |
+| `update:*` | status, check | main | Packaged builds only; install-on-quit is enabled only after a verified backup |
 | `export:*` | archive, graphml, image | main | dialog-granted paths only; archive adds optional passphrase encryption |
 | `import:*` | preview, archive, file | main | dialog-granted paths only; snapshot backup **before** any bulk write; validate version → dedup → merge |
 | `dedup:*` | candidates, merge, undo | main | journaled merges (`merge_log`), undoable |

@@ -19,6 +19,8 @@ import { openImportWizard } from "./wizard.js";
 
 const $ = (id) => document.getElementById(id);
 const api = window.api;
+const IS_MAC = navigator.platform.startsWith("Mac");
+const shortcut = (key) => IS_MAC ? `⌘${key}` : `Ctrl+${key}`;
 
 // Carry existing local preferences into Orbit's namespace once, then remove
 // the superseded keys. This keeps the rebrand from resetting users' UI state.
@@ -51,6 +53,8 @@ const state = {
 
 let graphView, card, palette, explore, find, insights, geomap;
 let lastSnapshot = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let arrangeFitTimer = null;
 let currentView = "graph"; // "graph" | "explore" | "find" | "insights" | "settings" | "geomap"
 const CONTENT_VIEWS = ["graph", "explore", "find", "insights", "settings", "geomap"];
 // Drill-down navigation history. Each entry is a restorer for a place we can
@@ -97,6 +101,15 @@ function resetNav() {
   updateBackButton();
 }
 
+function setActiveViewSwitch(id) {
+  document.querySelectorAll(".view-switch button").forEach((el) => {
+    const b = /** @type {HTMLElement} */ (el);
+    const active = b.dataset.view === id;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", String(active));
+  });
+}
+
 function showView(view) {
   dismissLanding(); // any explicit view switch leaves the start screen
   if (currentView === "settings" && view !== "settings") disposeSettings($("settings"));
@@ -107,10 +120,7 @@ function showView(view) {
   $("insights").hidden = view !== "insights";
   $("settings").hidden = view !== "settings";
   $("geomap").hidden = view !== "geomap";
-  document.querySelectorAll(".view-switch button").forEach((el) => {
-    const b = /** @type {HTMLElement} */ (el);
-    b.classList.toggle("active", b.dataset.view === view);
-  });
+  setActiveViewSwitch(view);
   if (view === "explore") {
     explore.loadSaved().then(() => explore.run());
     explore.focus();
@@ -220,8 +230,8 @@ function goHome() {
   if (home != null) {
     graphView.focusAll(home); // the whole network, centred on you
     showHint(owner != null
-      ? "Home: your whole network - you're at the centre. ⌘K to search."
-      : "Home: your whole network. ⌘K to search.");
+      ? `Home: your whole network - you're at the centre. ${shortcut("K")} to search.`
+      : `Home: your whole network. ${shortcut("K")} to search.`);
   }
 }
 
@@ -239,6 +249,7 @@ function showFullGraph() {
   resetNav();
   showView("graph");
   graphView.showFull();
+  setActiveViewSwitch("network");
   setActiveNav("full-network");
   showHint("Full network. Drag to arrange (positions persist) · shift-click two people to trace a path.");
 }
@@ -472,6 +483,7 @@ function runCommand(id) {
     "geomap": () => openGeomap(),
     "list": () => openList(),
     "find": () => openFind(),
+    "find-current": () => focusCurrentFind(),
     "insights": () => openInsightsPage(),
     "import": () => startImport(),
     "export-archive": () => exportArchiveFlow(),
@@ -480,6 +492,7 @@ function runCommand(id) {
     "dedup": () => openDedupQueue({ onChanged: () => onDataChanged() }),
     "trash": () => openTrash({ onChanged: () => onDataChanged() }),
     "settings": () => openSettingsPage(),
+    "about": () => showAbout(),
     "shortcuts": () => showShortcuts(),
     "backup": () => doBackup(),
     "new-contact": () => palette.open(""),
@@ -489,19 +502,50 @@ function runCommand(id) {
   actions[id]?.();
 }
 
+async function showAbout() {
+  const m = openModal({ title: "About Orbit" });
+  const summary = el("div", "about-summary about-summary--dialog");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "about-logo");
+  svg.setAttribute("viewBox", "0 0 32 32");
+  svg.setAttribute("aria-label", "Orbit logo");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#orbit-mark");
+  svg.append(use);
+  const copy = el("div");
+  copy.append(
+    el("p", "about-dialog-name", "Orbit"),
+    el("p", "about-copy", "A local-first, encrypted relationship CRM for exploring the people, connections, and places in your network. Your contact graph stays on this device."),
+  );
+  summary.append(svg, copy);
+  const version = el("p", "dim mono field-hint", "Version…");
+  m.body.append(summary, version);
+  const close = el("button", null, "Close");
+  close.type = "button";
+  close.addEventListener("click", m.close);
+  m.foot.append(close);
+  try {
+    const status = await api.data.backupStatus({});
+    version.textContent = `Version ${status.appVersion} · no telemetry`;
+  } catch {
+    version.textContent = "No telemetry";
+  }
+}
+
 function showShortcuts() {
   const m = openModal({ title: "Keyboard shortcuts" });
   const rows = [
-    ["⌘K", "Command palette (search, commands, quick add)"],
-    ["⌘L", "Explore (faceted people-search)"],
-    ["⌘N", "New contact (via palette)"],
-    ["⌘E", "Export archive"],
+    [shortcut("K"), "Command palette (search, commands, quick add)"],
+    [shortcut("F"), "Find in the current view"],
+    [shortcut("L"), "Explore (faceted people-search)"],
+    [shortcut("N"), "New contact (via palette)"],
+    [shortcut("E"), "Export archive"],
     ["g g", "Graph home"],
     ["Esc", "Close / clear path / back to home"],
     ["Del", "Delete selected contact (undoable)"],
     ["↑ ↓ ↵", "Navigate and open in palette or lists"],
     ["shift-click node", "Shortest path from the selected contact"],
-    ["double-click node", "Pin / unpin (layout leaves it alone)"],
+    ["right-click node", "Add a connection"],
     ["drag node", "Reposition (persists in full-network view)"],
     ["?", "This overlay"],
   ];
@@ -664,7 +708,7 @@ function ownerOnboarding({ onDone } = {}) {
       return;
     }
     m.close();
-    toast("Profile saved. Add your first contact with ⌘K.");
+    toast(`Profile saved. Add your first contact with ${shortcut("K")}.`);
     onDone?.();
   });
   const skip = /** @type {HTMLButtonElement} */ (el("button", null, "Skip for now"));
@@ -811,7 +855,7 @@ function openList() {
 function openFind() {
   resetNav();
   showView("find");
-  setActiveNav(null);
+  setActiveNav("find");
 }
 
 function openInsightsPage() {
@@ -959,7 +1003,7 @@ async function computeInfluence() {
 function wireKeyboard() {
   let lastG = 0;
   window.addEventListener("keydown", (e) => {
-    const mod = e.metaKey || e.ctrlKey;
+    const mod = IS_MAC ? e.metaKey : e.ctrlKey;
     const typing = e.target instanceof HTMLInputElement ||
       e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
 
@@ -976,6 +1020,16 @@ function wireKeyboard() {
     if (mod && e.key.toLowerCase() === "l") {
       e.preventDefault();
       openList();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      focusCurrentFind();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "n") {
+      e.preventDefault();
+      palette.open("");
       return;
     }
     if (palette.isOpen) {
@@ -1003,11 +1057,14 @@ function wireKeyboard() {
       lastG = now;
     } else if (e.key === "?") {
       showShortcuts();
-    } else if (mod && e.key.toLowerCase() === "n") {
-      e.preventDefault();
-      palette.open("");
     }
   });
+}
+
+function focusCurrentFind() {
+  if (currentView === "find") find.focus();
+  else if (currentView === "explore") explore.focus();
+  else palette.open();
 }
 
 export async function init() {
@@ -1023,6 +1080,15 @@ export async function init() {
       }
     },
     onNodeMenu: (id, pos) => showConnectionMenu(id, graphView.nameOf(id) ?? "this contact", pos),
+    onAutoArrangeFull: async () => {
+      try {
+        await api.graph.layoutStop({});
+        await api.graph.layoutStart({ reset: true });
+        toast("Auto-arranging the full network…");
+      } catch (err) {
+        toastError(err);
+      }
+    },
   });
   explore = new ExploreView($("explore"), {
     onOpenContact: (id) => selectContact(id),
@@ -1046,6 +1112,18 @@ export async function init() {
     onRelChanged: async (id, fromId, fromName) => {
       await refreshAfterCardChange();
       selectContact(id, { keepView: true, from: fromId, fromName });
+    },
+    onDeleteConnection: async (edge, other) => {
+      const result = await api.edges.delete({
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        type: edge.type,
+      });
+      if (!result.ok) throw new Error("That connection no longer exists.");
+      graphView.clearHighlight();
+      await refreshAfterCardChange();
+      if (state.selectedId != null) await selectContact(state.selectedId, { keepView: true });
+      toast(`Deleted the connection to ${other.name}.`);
     },
     onHighlightConnection: (id) => (id != null ? graphView.highlightNode(id) : graphView.clearHighlight()),
     onDelete: (c) => deleteContact(c),
@@ -1074,7 +1152,7 @@ export async function init() {
       { label: "Go to graph home", hint: "g g", run: () => goHome() },
       { label: "Insights", hint: "network intelligence", run: () => openInsightsPage() },
       { label: "Find (query builder)", hint: "advanced search", run: () => openFind() },
-      { label: "Explore (facets)", hint: "⌘L", run: () => openList() },
+      { label: "Explore (facets)", hint: shortcut("L"), run: () => openList() },
       { label: "Keyboard shortcuts", hint: "?", run: () => showShortcuts() },
       { label: "Show full network", run: () => showFullGraph() },
       {
@@ -1091,7 +1169,8 @@ export async function init() {
         run: async () => {
           showFullGraph();
           try {
-            await api.graph.layoutStart({});
+            await api.graph.layoutStop({});
+            await api.graph.layoutStart({ reset: true });
             toast("Layout settling in the background…");
           } catch (err) {
             toastError(err);
@@ -1099,7 +1178,7 @@ export async function init() {
         },
       },
       { label: "Import contacts…", hint: ".vcf .csv .orbit", run: () => startImport() },
-      { label: "Export archive…", hint: "⌘E", run: () => exportArchiveFlow() },
+      { label: "Export archive…", hint: shortcut("E"), run: () => exportArchiveFlow() },
       { label: "Export graph as PNG…", run: () => exportImageFlow() },
       { label: "Export network as GraphML…", run: () => exportGraphMLFlow() },
       { label: "Settings", run: () => openSettingsPage() },
@@ -1135,9 +1214,22 @@ export async function init() {
     onCreateContact: (name) => createContact(name),
   });
 
-  api.graph.onLayoutTick((positions) => graphView.applyExternalPositions(positions));
+  api.graph.onLayoutTick((positions) => {
+    graphView.applyExternalPositions(positions);
+    if (graphView.mode !== "full") return;
+    // Worker messages are streamed in chunks. Refit once the stream has been
+    // quiet briefly, rather than making the camera jump on every tick.
+    if (arrangeFitTimer != null) clearTimeout(arrangeFitTimer);
+    arrangeFitTimer = setTimeout(() => graphView.fitCamera(), 250);
+  });
   api.app.onMenu((id) => runCommand(id));
-  const viewNav = { graph: () => goHome(), explore: () => openList(), find: () => openFind(), insights: () => openInsightsPage() };
+  const viewNav = {
+    graph: () => goHome(),
+    network: () => showFullGraph(),
+    geomap: () => openGeomap(),
+    explore: () => openList(),
+    find: () => openFind(),
+  };
   document.querySelectorAll(".view-switch button").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);
     b.addEventListener("click", () => viewNav[b.dataset.view]?.());
@@ -1152,12 +1244,14 @@ export async function init() {
   const collapseBtn = $("nav-collapse");
   const applyCollapsed = (c) => {
     sidebar.classList.toggle("collapsed", c);
-    collapseBtn.querySelector("i").textContent = c ? "»" : "«";
+    collapseBtn.querySelector("use").setAttribute("href", c ? "#nav-panel-open" : "#nav-panel-close");
     collapseBtn.querySelector("span").textContent = c ? "Expand" : "Collapse";
     collapseBtn.setAttribute("aria-label", c ? "Expand sidebar" : "Collapse sidebar");
     collapseBtn.title = c ? "Expand sidebar" : "Collapse sidebar";
   };
-  applyCollapsed(localStorage.getItem("orbit-sidebar") === "collapsed");
+  // A compact rail is the default; an explicit user choice to leave it open
+  // still persists across launches.
+  applyCollapsed(localStorage.getItem("orbit-sidebar") !== "open");
   collapseBtn.addEventListener("click", () => {
     const c = !sidebar.classList.contains("collapsed");
     localStorage.setItem("orbit-sidebar", c ? "collapsed" : "open");
@@ -1186,7 +1280,15 @@ export async function init() {
   $("btn-setup").addEventListener("click", () => ownerOnboarding({ onDone: async () => { await refreshSnapshot(); goHome(); palette.open(""); } }));
   $("btn-sample-small").addEventListener("click", () => loadSample("small"));
   $("btn-sample-large").addEventListener("click", () => loadSample("large"));
-  $("palette-kbd").textContent = navigator.platform.startsWith("Mac") ? "⌘K" : "Ctrl+K";
+  document.querySelectorAll("[data-shortcut]").forEach((node) => {
+    const item = /** @type {HTMLElement} */ (node);
+    item.textContent = shortcut(item.dataset.shortcut);
+  });
+  document.querySelectorAll("[data-shortcut-title]").forEach((node) => {
+    const item = /** @type {HTMLElement} */ (node);
+    const [label, key] = item.dataset.shortcutTitle.split("|");
+    item.title = `${label} (${shortcut(key)})`;
+  });
   wireKeyboard();
 
   // Start-screen (landing) actions.

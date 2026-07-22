@@ -33,7 +33,7 @@ function build() {
   db.pragma(`key = '${KEY}'`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  migrate(db, { backupDir: path.join(path.dirname(OUT), "backups") });
+  migrate(db, { backupDir: path.join(path.dirname(OUT), "backups"), key: KEY });
 
   const { contacts, edges } = seedSample(db, { count: N });
   db.pragma("wal_checkpoint(TRUNCATE)");

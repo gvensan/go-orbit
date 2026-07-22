@@ -8,7 +8,7 @@ import { CITIES, CITY_COORDS } from "../shared/cities.js";
 import { COUNTRIES, flagEmoji, parsePhone } from "../shared/countries.js";
 import { AUTOCOMPLETE_FIELDS, PRESET_VALUES, fieldType, validateField } from "../shared/field-types.js";
 import { EDGE_COLORS, EDGE_TYPES, initials, kinRolesFor, orgColor, reciprocalRole } from "./colors.js";
-import { el } from "./modal.js";
+import { confirmModal, el } from "./modal.js";
 import { pickLocationOnMap } from "./location-picker.js";
 import { toast, toastError } from "./toast.js";
 
@@ -147,6 +147,7 @@ export class ContactCard {
    *           onChanged: (id: number, from?: { from: number, fromName: string }) => void, onAddRelationship: (contact: any) => void,
    *           onAddConnection: (contact: any, rect: DOMRect) => void,
    *           onRelChanged: (id: number, fromId: number, fromName: string) => void,
+   *           onDeleteConnection: (edge: any, other: any) => Promise<void>,
    *           onHighlightConnection: (id: number | null) => void,
    *           getIntroChain: (id: number) => { id: number, name: string }[] }} handlers
    */
@@ -154,7 +155,7 @@ export class ContactCard {
     this.panel = panel;
     this.handlers = handlers;
     this.depth = 1;
-    this.connExpanded = false; // Connections start collapsed
+    this.connExpanded = true; // Connections are useful context, so show them by default.
   }
 
   hide() {
@@ -172,7 +173,7 @@ export class ContactCard {
     this.contact = contact;
     this.context = context;
     this.panel.hidden = false;
-    // Refresh the opt-in every time the card opens: Settings may have changed
+    // Refresh the online preference every time the card opens: Settings may have changed
     // it since this long-lived card instance was last used.
     this._locOnline = false;
     this._locOnlineReady = window.api.location.online({}).then(
@@ -681,7 +682,7 @@ export class ContactCard {
     tagView.addEventListener("click", openTagEditor);
     p.append(tagSec);
 
-    // --- connections (collapsible, default collapsed; read-only labels) ---
+    // --- connections (collapsible, shown by default) ---
     const conn = el("div", "card-section");
     const cHead = el("div", "section-head collapsible");
     cHead.append(el("h3", null, `Connections · ${neighbors.length}`));
@@ -698,20 +699,55 @@ export class ContactCard {
       }
       for (const n of neighbors.slice(0, 30)) {
         const row = el("div", "conn-row");
-        row.title = "Hover to highlight · double-click to open";
-        row.append(el("span", "conn-name-plain", n.name), el("span", "row-sub dim", n.org ?? ""));
+        const open = el("button", "conn-open");
+        open.type = "button";
+        open.title = `Open ${n.name}`;
+        open.append(el("span", "conn-name-plain", n.name), el("span", "row-sub dim", n.org ?? ""));
         const edge = edgeByOther.get(n.id);
         if (edge) {
           const kinRole = edge.type === "family" && edge.metadata?.kin ? edge.metadata.kin[n.id] : null;
           const lbl = el("span", "conn-rel-label", kinRole || edge.type);
           lbl.style.color = EDGE_COLORS[edge.type] ?? "";
           if (kinRole) lbl.title = `family · ${kinRole}`;
-          row.append(lbl);
+          open.append(lbl);
         }
-        row.append(el("span", "conn-degree mono", `${n.degree}°`));
+        open.append(el("span", "conn-degree mono", `${n.degree}°`));
+        row.append(open);
+        if (edge) {
+          const remove = el("button", "conn-delete");
+          remove.type = "button";
+          remove.title = `Delete connection to ${n.name}`;
+          remove.setAttribute("aria-label", `Delete connection to ${n.name}`);
+          const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          icon.setAttribute("viewBox", "0 0 24 24");
+          icon.setAttribute("aria-hidden", "true");
+          const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+          use.setAttribute("href", "#nav-trash");
+          icon.append(use);
+          remove.append(icon);
+          remove.addEventListener("click", async () => {
+            const relation = edge.type === "family" && edge.metadata?.kin?.[n.id]
+              ? edge.metadata.kin[n.id]
+              : edge.type;
+            const yes = await confirmModal({
+              title: "Delete connection?",
+              message: `Delete the ${relation} connection between ${contact.name} and ${n.name}? Neither contact will be deleted.`,
+              confirmLabel: "Delete connection",
+              danger: true,
+            });
+            if (!yes) return;
+            remove.disabled = true;
+            try {
+              await this.handlers.onDeleteConnection(edge, n);
+            } catch (err) {
+              remove.disabled = false;
+              toastError(err);
+            }
+          });
+        }
         row.addEventListener("mouseenter", () => this.handlers.onHighlightConnection(n.id));
         row.addEventListener("mouseleave", () => this.handlers.onHighlightConnection(null));
-        row.addEventListener("dblclick", () => this.handlers.onNavigate(n.id));
+        open.addEventListener("click", () => this.handlers.onNavigate(n.id));
         conn.append(row);
       }
       if (neighbors.length > 30) conn.append(el("p", "mono dim", `+ ${neighbors.length - 30} more in the graph`));

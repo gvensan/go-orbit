@@ -40,7 +40,7 @@ Do not re-decide these; the renderer plugs into them:
 - **Layout:** ForceAtlas2 via `graphology-layout-forceatlas2`, run in a **worker** (its supervisor mode streams positions). Layout never runs on the render or main thread. Progressive: stream positions as they settle, then freeze.
 - **Level of detail:** cull off-viewport nodes/edges; render labels only above a zoom threshold or for high-degree nodes, to avoid a label storm at full scale.
 - **High-DPI:** sigma handles `devicePixelRatio`; any custom canvas must scale its backing store by `dpr` or it renders blurry on Retina/4K.
-- **Incremental updates:** adding or removing a contact mutates the graphology instance and updates sigma in place — pin existing positions, lay out only the new node locally. No full relayout, no visual jump.
+- **Incremental updates:** adding or removing a contact mutates the graphology instance and updates sigma in place — preserve existing positions and lay out only the new node locally. No full relayout, no visual jump.
 
 **Where analytics run.** Degree centrality is trivial and precomputed. Betweenness centrality on 20k/200k is O(V·E) — compute it in a **worker, on demand, and cache it**; never on the main thread. Document this so it isn't naively called inline.
 
@@ -64,7 +64,7 @@ Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist comput
 | WebGL render at scale | 20k nodes / 200k edges without collapse; LOD + viewport culling |
 | Meaningful default view | Opens on a focused/filtered subgraph, not the full hairball |
 | Pan / zoom / fit | Wheel + controls; reset and fit-to-view; smooth at scale |
-| Node drag | Reposition a node; pin/unpin |
+| Node drag | Reposition a node; persist the position in full-network view |
 | Node size = centrality | Degree-scaled radius so hubs are visible |
 | Typed edges + legend | Edge color by relationship type; readable legend |
 | Node color by group | Org / cluster color encoding |
@@ -93,7 +93,7 @@ Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist comput
 |---|---|
 | Minimap / overview | Overview pane with viewport indicator |
 | Export | PNG / SVG snapshot, GraphML for the network |
-| Saved / pinned layouts | Persist manual arrangements per view |
+| Saved layouts | Persist manual arrangements per view |
 | Path animation | Animate traversal along a shortest path |
 | Signal overlays | Heatmap by centrality, recency, or unread |
 | Edge bundling | Reduce clutter in dense regions |

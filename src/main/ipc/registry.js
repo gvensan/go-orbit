@@ -31,6 +31,12 @@ const { importContacts } = require("../ingest/importer");
 const { exportArchive, importArchive, readArchive, MAGIC } = require("../ingest/archive");
 const { AppError, toTransportError } = require("./errors");
 const v = require("./validate");
+const { EXPLORE_SORT_KEYS } = require("../explore/service");
+
+function locationOnline(db) {
+  const stored = meta.get(db, "location.online");
+  return stored == null ? config.location.onlineDefault : stored === "1";
+}
 
 /**
  * The renderer is untrusted: file paths are only honored when the user picked
@@ -97,7 +103,7 @@ const exploreFilters = v.obj({
   degreeBuckets: v.opt(strList(10)),
 });
 const exploreSort = (x, n) =>
-  ["name", "org", "degree", "recent", "overdue"].includes(x) ? x : v.fail(`${n} must be name|org|degree|recent|overdue.`);
+  EXPLORE_SORT_KEYS.includes(x) ? x : v.fail(`${n} must be a sortable Explore column.`);
 const exploreScope = (x, n) => ["all", "family", "friends"].includes(x) ? x : v.fail(`${n} must be all|family|friends.`);
 
 /**
@@ -110,7 +116,8 @@ const exploreScope = (x, n) => ["all", "family", "friends"].includes(x) ? x : v.
  *           dialog: { openFile: (p: any) => any, saveFile: (p: any) => any },
  *           grantedPaths: Set<string>, dbPath: string, appVersion: string, logPath: string,
  *           restoreLatestAndRelaunch: () => any,
- *           restoreSnapshotAndRelaunch: (file: string) => any }} ctx
+ *           restoreSnapshotAndRelaunch: (file: string) => any,
+ *           updateStatus: () => any, updateCheck: () => Promise<any> }} ctx
  */
 function buildRegistry(ctx) {
   return {
@@ -259,19 +266,20 @@ function buildRegistry(ctx) {
       },
     },
 
-    // Location autocomplete: opt-in online city search (main-process fetch only).
+    // Location autocomplete: online by default, user-disableable, and fetched
+    // only by the main process.
     "location:search": {
       validate: v.obj({ query: v.req((x, n) => v.str(x, n, { min: 1, max: 500 })) }),
       handle: async (p) => {
-        if (meta.get(ctx.db, "location.online") !== "1") return []; // gated on the opt-in
+        if (!locationOnline(ctx.db)) return [];
         return searchCities(p.query);
       },
     },
     "location:online": {
       validate: v.obj({}),
-      handle: () => ({ enabled: meta.get(ctx.db, "location.online") === "1" }),
+      handle: () => ({ enabled: locationOnline(ctx.db) }),
     },
-    // Online map tiles (OpenStreetMap), gated on the same opt-in. Fetched in the
+    // Online map tiles (OpenStreetMap), gated on the same user preference. Fetched in the
     // main process, returned as a data: URL; null when off/offline so the
     // renderer falls back to its bundled vector map.
     "map:tile": {
@@ -283,7 +291,7 @@ function buildRegistry(ctx) {
         layer: v.opt((x, n) => x === "base" || x === "labels" ? x : v.fail(`${n} must be base|labels`)),
       }),
       handle: async (p) => {
-        if (meta.get(ctx.db, "location.online") !== "1") return { dataUrl: null };
+        if (!locationOnline(ctx.db)) return { dataUrl: null };
         const r = await fetchTile(p.z, p.x, p.y, p.theme === "light" ? "light" : "dark", p.layer);
         return { dataUrl: r ? r.dataUrl : null };
       },
@@ -322,7 +330,7 @@ function buildRegistry(ctx) {
             else pending.push({ id: r.id, f });
           }
         })();
-        if (meta.get(ctx.db, "location.online") === "1") {
+        if (locationOnline(ctx.db)) {
           for (const p of pending.slice(0, 40)) {
             const results = await searchCities(p.f.location);
             if (results[0]) {
@@ -398,8 +406,8 @@ function buildRegistry(ctx) {
       },
     },
     "graph:layoutStart": {
-      validate: v.obj({}),
-      handle: () => ctx.layout.start(ctx.graph, ctx.sendLayoutTick),
+      validate: v.obj({ reset: v.opt(v.bool) }),
+      handle: (p) => ctx.layout.start(ctx.graph, ctx.sendLayoutTick, { reset: p.reset }),
     },
     "graph:layoutStop": {
       validate: v.obj({}),
@@ -444,6 +452,14 @@ function buildRegistry(ctx) {
         const p = takeBackup(ctx.db, ctx.backupDir, { key: ctx.key });
         return { path: p, createdAt: Date.now(), ok: true };
       },
+    },
+    "update:status": {
+      validate: v.obj({}),
+      handle: () => ctx.updateStatus(),
+    },
+    "update:check": {
+      validate: v.obj({}),
+      handle: () => ctx.updateCheck(),
     },
     "backup:status": {
       validate: v.obj({}),

@@ -25,7 +25,7 @@ class LayoutService {
    * @param {import('./store').GraphStore} graphStore
    * @param {(positions: Record<number, {x: number, y: number}>) => void} sendTick
    */
-  start(graphStore, sendTick) {
+  start(graphStore, sendTick, { reset = false } = {}) {
     if (this.worker) return { running: true };
 
     const persisted = new Map(
@@ -35,7 +35,7 @@ class LayoutService {
     const snap = graphStore.snapshot();
     const R = 100 * Math.sqrt(Math.max(1, snap.nodes.length) / 50);
     const nodes = snap.nodes.map((n, i) => {
-      const p = persisted.get(n.id);
+      const p = reset ? null : persisted.get(n.id);
       const angle = (2 * Math.PI * i) / Math.max(1, snap.nodes.length);
       return {
         id: n.id,
@@ -53,6 +53,9 @@ class LayoutService {
     this.worker = worker;
 
     worker.on("message", (msg) => {
+      // A reset can replace a worker while its final message is already queued.
+      // Never let that stale worker update or stop the new arrangement.
+      if (this.worker !== worker) return;
       if (msg.type === "tick") {
         sendTick(msg.positions);
       } else if (msg.type === "done") {
@@ -63,6 +66,7 @@ class LayoutService {
       }
     });
     worker.on("error", (err) => {
+      if (this.worker !== worker) return;
       this.log(`[layout] worker error: ${err.message}`);
       this.stop();
     });
@@ -83,11 +87,12 @@ class LayoutService {
 
   stop() {
     if (this.worker) {
-      this.worker.terminate().catch(() => {});
+      const worker = this.worker;
       this.worker = null;
+      worker.terminate().catch(() => {});
     }
     return { running: false };
   }
 }
 
-module.exports = { LayoutService };
+exports.LayoutService = LayoutService;

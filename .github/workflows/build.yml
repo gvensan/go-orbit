@@ -13,10 +13,10 @@ concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
-# ABI note: there is no postinstall rebuild. After `npm ci` the native module
-# targets the Node ABI, which is what typecheck/migrate/fixture/test need.
-# Packaging rebuilds it for Electron (prebuild hook); the post-build smoke test
-# deliberately switches the working tree back to the Node ABI.
+# ABI note: the workspace always targets Electron's embedded Node ABI.
+# postinstall performs a forced native rebuild; tests, migrations, fixtures,
+# and source smoke checks run through scripts/electron-node.js so no command can
+# leave development unable to launch after silently switching back to Node ABI.
 
 jobs:
   test:
@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
 
@@ -44,6 +44,7 @@ jobs:
           fi
 
       - run: npm run typecheck
+      - run: npm audit --audit-level=high
       - run: npm run migrate:ci
       - run: npm run fixture
       - run: npm test
@@ -78,7 +79,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - name: Cache Electron downloads
         uses: actions/cache@v4
@@ -100,11 +101,14 @@ jobs:
           # electron-builder 24 reads this standard CI slug while generating
           # update metadata, even when it is explicitly told not to publish.
           TRAVIS_REPO_SLUG: ${{ github.repository }}
-      - name: Smoke test encrypted database
-        shell: bash
-        run: |
-          npm run rebuild:node
-          node scripts/smoke-open-db.js
+      - name: Smoke test packaged application (Linux)
+        if: matrix.platform == 'Linux'
+        run: xvfb-run -a node scripts/smoke-packaged.js
+      - name: Smoke test packaged application (macOS/Windows)
+        if: matrix.platform != 'Linux'
+        run: node scripts/smoke-packaged.js
+      - name: Smoke test source database layer
+        run: npm run smoke:db
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -151,7 +155,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - name: Cache Electron downloads
         uses: actions/cache@v4
@@ -190,17 +194,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRAVIS_REPO_SLUG: ${{ github.repository }}
-          # macOS signing and notarization
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # Platform signing (macOS also uses the notarization credentials below)
+          CSC_LINK: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows Authenticode signing
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      - name: Smoke test encrypted database
-        shell: bash
-        run: |
-          npm run rebuild:node
-          node scripts/smoke-open-db.js
+      - name: Smoke test packaged application (Linux)
+        if: matrix.platform == 'Linux'
+        run: xvfb-run -a node scripts/smoke-packaged.js
+      - name: Smoke test packaged application (macOS/Windows)
+        if: matrix.platform != 'Linux'
+        run: node scripts/smoke-packaged.js
+      - name: Smoke test source database layer
+        run: npm run smoke:db

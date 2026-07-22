@@ -68,7 +68,8 @@ export class GraphView {
    * @param {HTMLElement} container
    * @param {{ onSelect: (id: number) => void, onShiftSelect: (id: number) => void,
    *           onDragEnd: (id: number, pos: {x: number, y: number}) => void,
-   *           onNodeMenu?: (id: number, pos: {x: number, y: number}) => void }} handlers
+   *           onNodeMenu?: (id: number, pos: {x: number, y: number}) => void,
+   *           onAutoArrangeFull?: () => void }} handlers
    */
   constructor(container, handlers) {
     this.container = container;
@@ -89,7 +90,6 @@ export class GraphView {
     this.communities = new Map();
     this.dragging = null;
     this.dragMoved = false;
-    this.pinned = new Set(); // session pins: layout leaves these alone
     this.theme = graphTheme();
     // "all" = gender ring on every node; "hover" = only the hovered node.
     this.genderRingMode = localStorage.getItem("orbit-gender-ring") || "all";
@@ -115,13 +115,23 @@ export class GraphView {
     mmHide.addEventListener("click", () => this.setMinimapVisible(false));
     const mmFit = document.createElement("button");
     mmFit.className = "minimap-fit"; mmFit.type = "button"; mmFit.textContent = "⛶"; mmFit.title = "Fit all to view";
+    mmFit.setAttribute("aria-label", "Fit all to view");
     mmFit.addEventListener("click", () => this.fitCamera());
-    this.minimapWrap.append(mmHide, mmFit, this.minimapCanvas);
+    const mmArrange = document.createElement("button");
+    mmArrange.className = "minimap-arrange"; mmArrange.type = "button"; mmArrange.textContent = "↻";
+    mmArrange.title = "Auto-arrange to reduce overlaps";
+    mmArrange.setAttribute("aria-label", "Auto-arrange graph to reduce overlaps");
+    mmArrange.addEventListener("click", () => {
+      if (this.mode === "full") this.handlers.onAutoArrangeFull?.();
+      else this.autoArrange();
+    });
+    mmHide.setAttribute("aria-label", "Hide minimap");
+    this.minimapWrap.append(mmHide, mmFit, mmArrange, this.minimapCanvas);
     this.minimapShow = document.createElement("button");
     this.minimapShow.className = "minimap-show"; this.minimapShow.type = "button"; this.minimapShow.textContent = "🗺"; this.minimapShow.title = "Show minimap";
     this.minimapShow.addEventListener("click", () => this.setMinimapVisible(true));
     this._mmMap = null;
-    this._mmDragging = false;
+    this._mmDragging = /** @type {number | null} */ (null);
 
     this.sigma = new Sigma(this.view, container, {
       // The graph lives in a pane that's hidden on other views (Settings, Geomap,
@@ -138,10 +148,6 @@ export class GraphView {
       defaultDrawNodeHover: (ctx, data, settings) => this.drawNodeHover(ctx, data, settings),
       nodeReducer: (node, data) => {
         const out = { ...data };
-        if (this.pinned.has(node)) {
-          out.size = data.size + 2;
-          out.forceLabel = true;
-        }
         // Center node color follows the theme (flips live on toggle)...
         if (this.center != null && node === String(this.center)) out.color = this.theme.center;
         // ...but the owner ("you") stays sun-gold even when it's the centre.
@@ -198,9 +204,20 @@ export class GraphView {
 
     // Minimap panning: click / drag jumps the main camera to that spot.
     const mmPan = (ev) => this.panFromMinimap(ev);
-    this.minimapCanvas.addEventListener("mousedown", (ev) => { this._mmDragging = true; mmPan(ev); });
-    window.addEventListener("mousemove", (ev) => { if (this._mmDragging) mmPan(ev); });
-    window.addEventListener("mouseup", () => { this._mmDragging = false; });
+    this.minimapCanvas.addEventListener("pointerdown", (ev) => {
+      if (!ev.isPrimary || ev.button !== 0) return;
+      this._mmDragging = ev.pointerId;
+      this.minimapCanvas.setPointerCapture(ev.pointerId);
+      mmPan(ev);
+    });
+    this.minimapCanvas.addEventListener("pointermove", (ev) => {
+      if (this._mmDragging === ev.pointerId) mmPan(ev);
+    });
+    const mmEnd = (ev) => {
+      if (this._mmDragging === ev.pointerId) this._mmDragging = null;
+    };
+    this.minimapCanvas.addEventListener("pointerup", mmEnd);
+    this.minimapCanvas.addEventListener("pointercancel", mmEnd);
 
     this.sigma.on("clickNode", ({ node, event }) => {
       if (this.dragMoved) return; // this click is the tail of a drag
@@ -231,15 +248,6 @@ export class GraphView {
         this.hoverCard.hidden = true;
         this.handlers.onNodeMenu(Number(this.hovered), { x: ev.clientX, y: ev.clientY });
       }
-    });
-
-    // Double-click pins/unpins: pinned nodes keep their position through
-    // layout ticks (their dragged spot is already persisted in full mode).
-    this.sigma.on("doubleClickNode", (e) => {
-      e.preventSigmaDefault(); // no zoom-on-double-click
-      const node = e.node;
-      this.pinned.has(node) ? this.pinned.delete(node) : this.pinned.add(node);
-      this.sigma.refresh();
     });
 
     // Node drag (GRAPH_CANVAS §7 must-have). Camera stays put via
@@ -831,7 +839,30 @@ export class GraphView {
     if (this.sparkleRAF != null) { cancelAnimationFrame(this.sparkleRAF); this.sparkleRAF = null; }
   }
 
-  runEgoLayout() {
+  /** Re-seed the visible graph, then settle it with collision-aware forces. */
+  autoArrange() {
+    if (!this.view.order) return;
+    this.worker?.terminate();
+    this.worker = null;
+    const radius = 100 * Math.sqrt(Math.max(1, this.view.order) / 50);
+    const nodes = this.view.nodes();
+    nodes.forEach((id, i) => {
+      const isCenter = this.center != null && id === String(this.center);
+      const angle = (2 * Math.PI * i) / Math.max(1, nodes.length) + 0.42;
+      this.view.mergeNodeAttributes(id, {
+        x: isCenter ? 0 : radius * Math.cos(angle),
+        y: isCenter ? 0 : radius * Math.sin(angle),
+      });
+    });
+    if (this.view.order < 3) {
+      this.sigma.refresh();
+      this.fitCamera();
+      return;
+    }
+    this.runEgoLayout({ fitOnDone: true });
+  }
+
+  runEgoLayout({ fitOnDone = false } = {}) {
     if (this.view.order < 3) { this.sigma.refresh(); return; }
     const nodes = [];
     this.view.forEachNode((id, a) => nodes.push({ id, x: a.x, y: a.y, size: a.size }));
@@ -849,6 +880,7 @@ export class GraphView {
         if (last) this.applyPositions(last);
         worker.terminate();
         if (this.worker === worker) this.worker = null;
+        if (fitOnDone) this.fitCamera();
       }
     };
     worker.postMessage({ nodes, edges });
@@ -865,7 +897,7 @@ export class GraphView {
 
   applyPositions(positions) {
     for (const [id, p] of Object.entries(positions)) {
-      if (this.view.hasNode(id) && !this.pinned.has(id)) {
+      if (this.view.hasNode(id)) {
         this.view.setNodeAttribute(id, "x", p.x);
         this.view.setNodeAttribute(id, "y", p.y);
       }
