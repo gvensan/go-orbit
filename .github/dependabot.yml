@@ -6,6 +6,12 @@ updates:
       interval: monthly
     open-pull-requests-limit: 6
     versioning-strategy: increase
+    ignore:
+      # @types/node must match Electron's embedded Node major (24 for Electron 43),
+      # never run ahead of the runtime. Allow patches/minors within the major,
+      # block major bumps. See CLAUDE.md guardrails.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       runtime-libraries:
         dependency-type: production
