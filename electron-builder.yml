@@ -40,9 +40,18 @@ win:
     - portable
   # signtool/cloud signing configured via CSC_LINK / CSC_KEY_PASSWORD secrets
 
+# The Windows installers default to arch-less names (e.g. "Orbit Setup 0.1.0.exe"),
+# so an x64 and an arm64 build collide - overwriting each other on disk and
+# stranding one architecture in latest.yml. Put the arch in the filename so both
+# coexist and the auto-updater serves the right one per machine. macOS and Linux
+# targets already carry the arch by default.
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}-${arch}.${ext}
 
 linux:
   category: Utility
