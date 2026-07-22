@@ -156,10 +156,32 @@ jobs:
           tag="v${version}-${slug}.${GITHUB_RUN_NUMBER}"
           title="Orbit ${version} (${slug} build ${GITHUB_RUN_NUMBER})"
 
-          mapfile -d '' assets < <(find artifacts -type f \
+          mapfile -d '' found < <(find artifacts -type f \
             \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' \
                -o -name '*.deb' -o -name '*.rpm' \) -print0)
-          ((${#assets[@]} > 0)) || { echo "No installers found to publish" >&2; exit 1; }
+          ((${#found[@]} > 0)) || { echo "No installers found to publish" >&2; exit 1; }
+
+          # The Windows NSIS and portable installers are named without the
+          # architecture (e.g. "Orbit Setup 0.1.0.exe"), so x64 and arm64 - built
+          # on separate runners - collide when uploaded to one release. Inject the
+          # arch (taken from the artifact dir "orbit-<platform>-<arch>") before the
+          # extension for any basename that appears more than once. Names that
+          # already carry the arch (.dmg/.AppImage/.deb/.rpm) are left untouched.
+          declare -A seen
+          for f in "${found[@]}"; do bn="$(basename "$f")"; seen[$bn]=$(( ${seen[$bn]:-0} + 1 )); done
+          staging="$(mktemp -d)"
+          assets=()
+          for f in "${found[@]}"; do
+            bn="$(basename "$f")"
+            arch="$(basename "$(dirname "$f")")"; arch="${arch##*-}"
+            if (( ${seen[$bn]} > 1 )); then
+              new="${bn%.*}-${arch}.${bn##*.}"
+            else
+              new="$bn"
+            fi
+            cp "$f" "$staging/$new"
+            assets+=("$staging/$new")
+          done
           printf 'Publishing %d assets as %s\n' "${#assets[@]}" "$tag"
 
           notes=$'Unsigned test build for internal distribution.\n\n'
