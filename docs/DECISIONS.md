@@ -3,6 +3,17 @@
 Deliberate amendments to the original scaffold assumptions, per the CLAUDE.md
 rule that assumptions change deliberately, not by drift. Newest first.
 
+## Future TODO
+
+- [ ] **Support touch and pen when dragging individual graph nodes.** The
+  current custom node-drag lifecycle in `graph-view.js` listens to Sigma's
+  mouse captor. General touch camera pan/zoom, Geomap dragging, and minimap
+  dragging already work, but manually repositioning a node is not reliable on
+  Windows touchscreens or with a stylus. Extend the same start/move/end,
+  click-suppression, camera-locking, and persisted-position behavior through
+  Sigma's touch captor or a unified pointer implementation. Verify mouse,
+  touch, and pen input without double-selecting or moving the camera.
+
 ## 2026-07-22 - Graph position pinning removed
 
 - The session-only Pin Position action added little beyond persisted node drag

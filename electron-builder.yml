@@ -21,7 +21,9 @@ npmRebuild: true
 # Auto-update feed — see docs/BUILD_AND_RELEASE.md §4.
 publish:
   provider: github
-  releaseType: release
+  # CI promotes the draft only after signing, update metadata, and launch
+  # checks pass for every platform.
+  releaseType: draft
 
 mac:
   category: public.app-category.productivity
@@ -37,9 +39,9 @@ mac:
 win:
   target:
     - target: nsis
-      arch: [x64]
+      arch: [arm64, x64]
     - target: portable
-      arch: [x64]
+      arch: [arm64, x64]
   # signtool/cloud signing configured via CSC_LINK / CSC_KEY_PASSWORD secrets
 
 nsis:
@@ -50,7 +52,13 @@ linux:
   category: Utility
   maintainer: Orbit
   vendor: Orbit
+  # Keep the generated .desktop filename and Chromium WM_CLASS aligned so
+  # Linux desktops group Orbit windows under the installed launcher icon.
+  syncDesktopName: true
   target:
-    - AppImage
-    - deb
-    - rpm
+    - target: AppImage
+      arch: [arm64, x64]
+    - target: deb
+      arch: [arm64, x64]
+    - target: rpm
+      arch: [arm64, x64]

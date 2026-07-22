@@ -25,9 +25,26 @@ ABI for that platform+arch.
 
 | OS | Runner | Outputs | Arch |
 |---|---|---|---|
-| macOS | `macos-latest` | `.dmg`, `.zip` | `arm64`, `x64` (or universal) |
-| Windows | `windows-latest` | NSIS `.exe`, portable | `x64` (optionally `arm64`) |
-| Linux | `ubuntu-latest` | `AppImage`, `.deb`, `.rpm` | `x64` |
+| macOS | `macos-latest`, `macos-15-intel` | `.dmg`, `.zip` | `arm64`, `x64` |
+| Windows | `windows-11-arm`, `windows-latest` | NSIS `.exe`, portable | `arm64`, `x64` |
+| Linux | `ubuntu-24.04-arm`, `ubuntu-latest` | `AppImage`, `.deb`, `.rpm` | `arm64`, `x64` |
+
+Each architecture is built and smoke-tested on a native runner. Do not combine
+architectures in one job: electron-builder's final native rebuild can leave the
+workspace addon compiled for the other architecture even when the packaged app
+itself is correct.
+
+Tagged publishing is the deliberate exception: each platform builds both
+already-validated architectures together so electron-builder emits a single
+`latest-*.yml` containing every architecture. Separate publishing jobs would
+race to overwrite that shared auto-update metadata file.
+
+Release CI verifies the resulting macOS bundle with `codesign` and Gatekeeper,
+every Windows installer with `Get-AuthenticodeSignature`, and each platform's
+update manifest for hashed ARM64 and x64 artifacts. Missing credentials or
+incomplete update metadata fail the release. Artifacts remain in a private
+GitHub draft until every platform passes; only then does CI publish the release
+and make it visible to the auto-updater.
 
 ## 3. Signing & notarization
 

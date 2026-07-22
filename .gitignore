@@ -43,10 +43,19 @@ test/fixtures/
 # Signing credentials must only live in GitHub Actions secrets
 *.p12
 *.pfx
+*.p8
+*.pem
+*.key
+*.cer
+*.crt
+*.snk
 *.jks
 *.keystore
-AuthKey_*.p8
 *.mobileprovision
+.secrets
+.secrets.*
+!.secrets.example
+!.secrets.*.example
 
 # OS, logs, and crash reports
 .DS_Store

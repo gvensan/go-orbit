@@ -50,9 +50,10 @@ jobs:
       - run: npm test
 
   # Every main-branch check-in and PR gets downloadable, unsigned installers.
-  # Builds run on their target OS because the encrypted SQLite module is native.
+  # Every OS/architecture pair uses a native runner because encrypted SQLite is
+  # native code; this makes the packaged launch smoke an ABI/architecture proof.
   package:
-    name: Package (${{ matrix.platform }})
+    name: Package (${{ matrix.platform }} ${{ matrix.arch }})
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     needs: test
     runs-on: ${{ matrix.os }}
@@ -65,14 +66,32 @@ jobs:
         include:
           - platform: macOS
             os: macos-latest
+            arch: arm64
+            electron_cache: ~/Library/Caches/electron
+            builder_cache: ~/Library/Caches/electron-builder
+          - platform: macOS
+            os: macos-15-intel
+            arch: x64
             electron_cache: ~/Library/Caches/electron
             builder_cache: ~/Library/Caches/electron-builder
           - platform: Windows
             os: windows-latest
+            arch: x64
+            electron_cache: ~/AppData/Local/electron/Cache
+            builder_cache: ~/AppData/Local/electron-builder/Cache
+          - platform: Windows
+            os: windows-11-arm
+            arch: arm64
             electron_cache: ~/AppData/Local/electron/Cache
             builder_cache: ~/AppData/Local/electron-builder/Cache
           - platform: Linux
             os: ubuntu-latest
+            arch: x64
+            electron_cache: ~/.cache/electron
+            builder_cache: ~/.cache/electron-builder
+          - platform: Linux
+            os: ubuntu-24.04-arm
+            arch: arm64
             electron_cache: ~/.cache/electron
             builder_cache: ~/.cache/electron-builder
     steps:
@@ -87,13 +106,13 @@ jobs:
           path: |
             ${{ matrix.electron_cache }}
             ${{ matrix.builder_cache }}
-          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: electron-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - name: Install rpm tooling (Linux)
         if: matrix.platform == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y rpm
       - name: Build unsigned installers
-        run: npm run build -- --publish never
+        run: npm run build -- --${{ matrix.arch }} --publish never
         env:
           # Check-in artifacts are for validation, not distribution. Disabling
           # discovery also prevents an incidental runner identity from signing.
@@ -107,12 +126,11 @@ jobs:
       - name: Smoke test packaged application (macOS/Windows)
         if: matrix.platform != 'Linux'
         run: node scripts/smoke-packaged.js
-      - name: Smoke test source database layer
-        run: npm run smoke:db
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: orbit-${{ matrix.platform }}-${{ github.sha }}
+          name: orbit-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           path: |
             dist/*.dmg
             dist/*.zip
@@ -127,6 +145,10 @@ jobs:
           compression-level: 0
 
   # Version tags publish signed/notarized installers to GitHub Releases.
+  # A platform's architectures intentionally share one release job: builder
+  # must generate one latest-*.yml containing every architecture rather than
+  # two jobs racing to replace the same auto-update metadata asset. Native
+  # architecture launch coverage is provided by the package matrix above.
   release:
     name: Release (${{ matrix.platform }})
     if: startsWith(github.ref, 'refs/tags/v')
@@ -163,7 +185,7 @@ jobs:
           path: |
             ${{ matrix.electron_cache }}
             ${{ matrix.builder_cache }}
-          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: electron-${{ runner.os }}-release-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - name: Install rpm tooling (Linux)
         if: matrix.platform == 'Linux'
@@ -200,11 +222,46 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify macOS code signing and notarization
+        if: matrix.platform == 'macOS'
+        shell: bash
+        run: |
+          bundle="$(find dist -maxdepth 2 -type d -name Orbit.app | head -1)"
+          [[ -n "$bundle" ]] || { echo "No unpacked Orbit.app found" >&2; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$bundle"
+          spctl --assess --type execute --verbose=2 "$bundle"
+      - name: Verify Windows Authenticode signatures
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem dist -Filter *.exe
+          if (-not $installers) { throw "No Windows installers found" }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature $installer.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "$($installer.Name) signature is $($signature.Status): $($signature.StatusMessage)"
+            }
+          }
+      - name: Verify multi-architecture update metadata
+        run: node scripts/verify-update-metadata.js "${{ matrix.platform }}"
       - name: Smoke test packaged application (Linux)
         if: matrix.platform == 'Linux'
         run: xvfb-run -a node scripts/smoke-packaged.js
       - name: Smoke test packaged application (macOS/Windows)
         if: matrix.platform != 'Linux'
         run: node scripts/smoke-packaged.js
-      - name: Smoke test source database layer
-        run: npm run smoke:db
+
+  # Keep partially uploaded or invalid artifacts private. A failed matrix leaves
+  # a recoverable draft; only a wholly verified release becomes update-visible.
+  finalize-release:
+    name: Publish verified release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Promote verified draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
