@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Must match config.security.csp exactly; enforced by test/ipc-contract.test.js -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'" />
+  <title>Orbit</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Orbit brand mark, reused wherever the logo appears -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="orbit-mark" viewBox="0 0 32 32">
+      <g transform="rotate(-22 16 16)">
+        <ellipse cx="16" cy="16" rx="13" ry="5.4" fill="none" stroke="#33507e" stroke-width="1.6"/>
+        <!-- invisible motion track (the ellipse as a path) -->
+        <path id="orbit-path" d="M 3,16 A 13,5.4 0 1 1 29,16 A 13,5.4 0 1 1 3,16" fill="none" stroke="none"/>
+        <!-- three contacts orbiting the track, 120° apart -->
+        <circle r="2.2" fill="#ff2d95">
+          <animateMotion dur="7s" repeatCount="indefinite" begin="0s"><mpath href="#orbit-path"/></animateMotion>
+        </circle>
+        <circle r="1.9" fill="#00c2ff">
+          <animateMotion dur="7s" repeatCount="indefinite" begin="-2.33s"><mpath href="#orbit-path"/></animateMotion>
+        </circle>
+        <circle r="1.7" fill="#3f9d76">
+          <animateMotion dur="7s" repeatCount="indefinite" begin="-4.66s"><mpath href="#orbit-path"/></animateMotion>
+        </circle>
+      </g>
+      <!-- the gold "you" sun at the centre: a breathing halo + gently pulsing core -->
+      <circle cx="16" cy="16" r="6" fill="#f5c542" opacity="0.3">
+        <animate attributeName="r" values="5.4;7.4;5.4" dur="3.2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.32;0.1;0.32" dur="3.2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="16" cy="16" r="4.3" fill="#f5c542">
+        <animate attributeName="r" values="4.1;4.7;4.1" dur="3.2s" repeatCount="indefinite"/>
+      </circle>
+    </symbol>
+  </svg>
+
+  <header id="topbar">
+    <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#orbit-mark"/></svg>Orbit</div>
+    <div class="view-switch" role="tablist" aria-label="View">
+      <button type="button" id="view-graph" class="active" data-view="graph">Graph</button>
+      <button type="button" id="view-explore" data-view="explore">Explore</button>
+      <button type="button" id="view-find" data-view="find">Find</button>
+    </div>
+    <button id="search-trigger" type="button" aria-haspopup="dialog">
+      <span>Search or run a command…</span>
+      <kbd id="palette-kbd">⌘K</kbd>
+    </button>
+    <div id="status" class="mono" aria-live="polite"></div>
+    <button id="theme-toggle" type="button" aria-label="Toggle light/dark theme" title="Toggle theme">🌙</button>
+  </header>
+
+  <div id="sample-banner" hidden>
+    <span id="sample-banner-text" class="mono"></span>
+    <div class="sample-banner-actions">
+      <button id="sample-switch" type="button" class="ghost"></button>
+      <button id="sample-exit" type="button" class="ghost" title="Back to the start screen">Exit exploring</button>
+      <button id="sample-reset" type="button" class="primary">Start my own network →</button>
+      <button id="sample-dismiss" type="button" class="ghost" title="Hide this bar for now" aria-label="Dismiss">✕</button>
+    </div>
+  </div>
+
+  <main id="main">
+    <nav id="sidebar" aria-label="Navigation">
+      <button type="button" class="nav-item active" data-nav="home" title="Graph"><i>◉</i><span>Graph</span></button>
+      <button type="button" class="nav-item" data-nav="full-network" title="Network"><i>❋</i><span>Network</span></button>
+      <button type="button" class="nav-item" data-nav="geomap" title="Geomap"><i>◍</i><span>Geomap</span></button>
+      <button type="button" class="nav-item" data-nav="list" title="Explore (⌘L)"><i>≣</i><span>Explore</span></button>
+      <button type="button" class="nav-item" data-nav="insights" title="Insights"><i>✶</i><span>Insights</span>
+        <b id="attention-badge" class="nav-badge" hidden></b></button>
+      <div class="nav-gap"></div>
+      <button type="button" class="nav-item" data-nav="import" title="Import contacts"><i>⇣</i><span>Import</span></button>
+      <button type="button" class="nav-item" data-nav="export-archive" title="Export archive (⌘E)"><i>⇡</i><span>Export</span></button>
+      <button type="button" class="nav-item" data-nav="dedup" title="Review duplicates"><i>⧉</i><span>Duplicates</span></button>
+      <button type="button" class="nav-item" data-nav="trash" title="Trash"><i>⌫</i><span>Trash</span></button>
+      <div class="nav-spacer"></div>
+      <button type="button" class="nav-item" data-nav="settings" title="Settings (⌘,)"><i>⚙</i><span>Settings</span></button>
+      <button type="button" class="nav-item" data-nav="shortcuts" title="Keyboard shortcuts (?)"><i>?</i><span>Shortcuts</span></button>
+      <button type="button" class="nav-item" id="nav-collapse" title="Collapse sidebar" aria-label="Collapse sidebar"><i>«</i><span>Collapse</span></button>
+    </nav>
+    <div id="graph-wrap">
+      <div id="graph-root" aria-label="Relationship graph"></div>
+      <div id="graph-nav" hidden>
+        <button id="graph-home" type="button" title="Back to home graph" aria-label="Back to home graph">⌂</button>
+        <button id="graph-back" type="button"></button>
+      </div>
+      <div id="legend" class="mono" hidden></div>
+      <div id="legend-gender" class="mono" hidden></div>
+      <div id="graph-hint" class="mono" hidden></div>
+    </div>
+    <div id="geomap" hidden aria-label="Geomap"></div>
+    <div id="explore" hidden aria-label="Explore contacts"></div>
+    <div id="find" hidden aria-label="Find contacts"></div>
+    <div id="insights" hidden aria-label="Insights"></div>
+    <div id="settings" hidden aria-label="Settings"></div>
+    <aside id="panel" hidden aria-label="Contact detail"></aside>
+  </main>
+
+  <section id="onboarding" hidden>
+    <h1><svg class="brand-mark brand-mark-lg" aria-hidden="true"><use href="#orbit-mark"/></svg>Orbit</h1>
+    <p class="onboard-lede">Your network, as a living map.</p>
+    <div class="onboard-points">
+      <p><strong>Local-first.</strong> Everything lives in one file on this device.
+         No account, no cloud, no sync.</p>
+      <p><strong>Encrypted at rest.</strong> The database is protected with AES-256;
+         the key was just created and stored in your OS keychain.</p>
+      <p><strong>Durable.</strong> Verified backups are taken automatically, and
+         deletes always go to a recoverable trash first.</p>
+    </div>
+    <div class="empty-actions">
+      <button id="btn-onboard" type="button" class="primary">Get started</button>
+    </div>
+    <p class="mono dim">Move devices any time with an encrypted export archive (⌘E)</p>
+  </section>
+
+  <section id="empty-state" hidden>
+    <h1><svg class="brand-mark brand-mark-lg" aria-hidden="true"><use href="#orbit-mark"/></svg>Orbit</h1>
+
+    <!-- Fresh start: no data yet -->
+    <div id="landing-fresh">
+      <p>Build your network, or explore a ready-made sample.<br />
+         Everything stays on this device, encrypted.</p>
+      <div class="empty-actions">
+        <button id="btn-setup" type="button" class="primary">Set up my network</button>
+      </div>
+      <div class="empty-samples mono dim">
+        <span>Just exploring?</span>
+        <button id="btn-sample-small" type="button" class="ghost">Sample · 100</button>
+        <button id="btn-sample-large" type="button" class="ghost">Sample · 5,000</button>
+      </div>
+    </div>
+
+    <!-- Exploring sample data: choose how to continue -->
+    <div id="landing-sample" hidden>
+      <p id="landing-sample-text"></p>
+      <div class="empty-actions">
+        <button id="landing-continue" type="button" class="primary">Continue exploring</button>
+        <button id="landing-switch" type="button" class="ghost"></button>
+      </div>
+      <div class="empty-samples mono dim">
+        <span>Ready for the real thing?</span>
+        <button id="landing-startown" type="button" class="ghost">Start my own network →</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="palette-root" hidden role="dialog" aria-modal="true" aria-label="Command palette"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <script type="module" src="./boot.js"></script>
+</body>
+</html>

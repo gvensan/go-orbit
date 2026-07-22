@@ -1,0 +1,58 @@
+# Dependencies and generated build/test output
+node_modules/
+dist/
+coverage/
+.nyc_output/
+.cache/
+.vite/
+*.tsbuildinfo
+
+# Local dev data (dev DB, keys, recovery snapshots) - user data, never commit
+.dev/
+.recovery-*/
+backups/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.tmp
+*.corrupt*
+ci.db
+dbkey.bin
+
+# Exported archives contain contact data
+*.orbit
+
+# Generated test fixtures (npm run fixture)
+test/fixtures/
+
+# Local tool/editor config
+.claude/settings.local.json
+.idea/
+.vscode/settings.json
+.vscode/*.local.json
+*.swp
+*.swo
+*~
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Signing credentials must only live in GitHub Actions secrets
+*.p12
+*.pfx
+*.jks
+*.keystore
+AuthKey_*.p8
+*.mobileprovision
+
+# OS, logs, and crash reports
+.DS_Store
+Thumbs.db
+*.log
+*.dmp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

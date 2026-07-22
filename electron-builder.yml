@@ -1,0 +1,54 @@
+appId: com.orbit.app
+productName: Orbit
+copyright: © Orbit
+
+directories:
+  output: dist
+  buildResources: build   # build/icon.png -> platform icons are generated here
+
+# The renderer ships prebuilt (vite build -> dist/renderer); renderer sources
+# and their deps (sigma etc.) stay out of the package.
+files:
+  - "src/main/**/*"
+  - "src/shared/**/*"
+  - "dist/renderer/**/*"
+  - "package.json"
+  - "!**/*.md"
+
+# Rebuild the native module (better-sqlite3-multiple-ciphers) against Electron's ABI.
+npmRebuild: true
+
+# Auto-update feed — see docs/BUILD_AND_RELEASE.md §4.
+publish:
+  provider: github
+  releaseType: release
+
+mac:
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  notarize: true            # requires APPLE_ID / API key secrets in CI
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # signtool/cloud signing configured via CSC_LINK / CSC_KEY_PASSWORD secrets
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb
+    - rpm
