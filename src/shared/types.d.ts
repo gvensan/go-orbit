@@ -476,12 +476,6 @@ export interface IpcContract {
   "graph:ego": { request: EgoQuery; response: number[] };
   "graph:path": { request: PathQuery; response: PathResult };
   "graph:centrality": { request: CentralityQuery; response: Record<number, number> };
-  "graph:layoutStart": { request: { reset?: boolean }; response: { running: boolean } };
-  "graph:layoutStop": { request: {}; response: { running: boolean } };
-  "graph:savePositions": {
-    request: { positions: Record<number, { x: number; y: number }> };
-    response: { ok: boolean };
-  };
 
   "tags:list": { request: {}; response: Tag[] };
   "contacts:setTags": { request: { id: number; tags: string[] }; response: { contact: Contact; tags: string[] } };
@@ -616,11 +610,6 @@ export interface RendererApi {
     ego: Call<"graph:ego">;
     path: Call<"graph:path">;
     centrality: Call<"graph:centrality">;
-    layoutStart: Call<"graph:layoutStart">;
-    layoutStop: Call<"graph:layoutStop">;
-    savePositions: Call<"graph:savePositions">;
-    /** Subscribe to streamed layout positions; returns an unsubscribe fn. */
-    onLayoutTick: (cb: (positions: Record<number, { x: number; y: number }>) => void) => () => void;
   };
   search: {
     query: Call<"search:query">;

@@ -744,6 +744,7 @@ export class ContactCard {
               toastError(err);
             }
           });
+          row.append(remove);
         }
         row.addEventListener("mouseenter", () => this.handlers.onHighlightConnection(n.id));
         row.addEventListener("mouseleave", () => this.handlers.onHighlightConnection(null));

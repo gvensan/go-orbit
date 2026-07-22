@@ -200,12 +200,6 @@ button.ghost { background: transparent; }
   border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
 }
 .minimap-fit:hover { color: var(--accent); }
-.minimap-arrange {
-  position: absolute; top: 3px; left: 23px; z-index: 1;
-  width: 17px; height: 17px; padding: 0; line-height: 1; font-size: 13px;
-  border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
-}
-.minimap-arrange:hover { color: var(--success, #54c58b); }
 .minimap-show {
   position: absolute; top: 10px; right: 10px; z-index: 9;
   padding: 5px 9px; font-size: 15px; line-height: 1; cursor: pointer;
@@ -241,7 +235,7 @@ button.ghost { background: transparent; }
   position: relative;
 }
 .nav-item[data-nav="home"] { --nav-icon: var(--nav-blue); }
-.nav-item[data-nav="full-network"] { --nav-icon: var(--nav-violet); }
+.nav-item[data-nav="network"] { --nav-icon: var(--nav-blue); }
 .nav-item[data-nav="geomap"] { --nav-icon: var(--nav-teal); }
 .nav-item[data-nav="list"] { --nav-icon: var(--nav-sky); }
 .nav-item[data-nav="find"] { --nav-icon: var(--nav-blue); }
@@ -352,17 +346,47 @@ button.ghost { background: transparent; }
   margin: 0 5px 0 8px;
   vertical-align: baseline;
 }
+/* On-canvas Graph|Mesh toggle: a segmented pill over the top-left of the canvas. */
+.canvas-view-toggle {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 6;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--hairline);
+}
+.canvas-view-toggle button {
+  border: 0;
+  background: none;
+  color: var(--dim);
+  border-radius: 5px;
+  padding: 4px 11px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.canvas-view-toggle button.active { background: var(--active); color: var(--text); }
+.canvas-view-toggle button:hover:not(.active) { color: var(--text); }
 #graph-hint {
   position: absolute;
-  top: 12px;
-  left: 16px;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(70%, 720px);
+  text-align: center;
   color: var(--faint);
   pointer-events: none;
 }
 #graph-nav {
   position: absolute;
-  top: 10px;
-  left: 14px;
+  top: 50px;
+  left: 16px;
   z-index: 4;
   display: flex;
   gap: 6px;
@@ -380,8 +404,6 @@ button.ghost { background: transparent; }
 #graph-nav button:hover { border-color: var(--faint); }
 /* Home icon: compact, glyph a touch larger than the back label. */
 #graph-home { padding: 5px 9px; font-size: 15px; line-height: 1; }
-/* When the graph nav is showing, nudge the hint below it. */
-#graph-wrap:has(#graph-nav:not([hidden])) #graph-hint { top: 44px; }
 
 /* ---- add-connection dropdown (right-click node / card button) ---- */
 .node-menu {
@@ -826,8 +848,9 @@ button.ghost { background: transparent; }
 
 /* View switch in the top bar */
 .view-switch { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--hairline); border-radius: 7px; padding: 2px; }
-.view-switch button { border: 0; background: none; color: var(--dim); border-radius: 5px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
+.view-switch button { border: 0; background: none; color: var(--dim); border-radius: 5px; padding: 4px 12px; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .view-switch button.active { background: var(--active); color: var(--text); }
+.view-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---- Find (query builder) ---- */
 #find { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }

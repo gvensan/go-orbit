@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [main]
 
-# Keep superseded check-in builds from consuming all three hosted runners.
+# Keep superseded check-in builds from consuming hosted runners.
 # A release build is never cancelled once its tag has been pushed.
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -26,8 +26,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -95,13 +95,13 @@ jobs:
             electron_cache: ~/.cache/electron
             builder_cache: ~/.cache/electron-builder
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - name: Cache Electron downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ matrix.electron_cache }}
@@ -120,6 +120,14 @@ jobs:
           # electron-builder 24 reads this standard CI slug while generating
           # update metadata, even when it is explicitly told not to publish.
           TRAVIS_REPO_SLUG: ${{ github.repository }}
+      - name: Configure Chromium sandbox (Linux)
+        if: matrix.platform == 'Linux'
+        shell: bash
+        run: |
+          mapfile -d '' sandboxes < <(find dist -maxdepth 2 -type f -name chrome-sandbox -print0)
+          ((${#sandboxes[@]} > 0)) || { echo "No packaged chrome-sandbox found" >&2; exit 1; }
+          sudo chown root:root "${sandboxes[@]}"
+          sudo chmod 4755 "${sandboxes[@]}"
       - name: Smoke test packaged application (Linux)
         if: matrix.platform == 'Linux'
         run: xvfb-run -a node scripts/smoke-packaged.js
@@ -128,7 +136,7 @@ jobs:
         run: node scripts/smoke-packaged.js
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orbit-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           path: |
@@ -174,13 +182,13 @@ jobs:
             electron_cache: ~/.cache/electron
             builder_cache: ~/.cache/electron-builder
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - name: Cache Electron downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ matrix.electron_cache }}
@@ -212,7 +220,7 @@ jobs:
             done
           fi
       - name: Build and publish signed release
-        run: npm run build -- --publish always
+        run: npm run build -- --arm64 --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRAVIS_REPO_SLUG: ${{ github.repository }}
@@ -244,6 +252,14 @@ jobs:
           }
       - name: Verify multi-architecture update metadata
         run: node scripts/verify-update-metadata.js "${{ matrix.platform }}"
+      - name: Configure Chromium sandbox (Linux)
+        if: matrix.platform == 'Linux'
+        shell: bash
+        run: |
+          mapfile -d '' sandboxes < <(find dist -maxdepth 2 -type f -name chrome-sandbox -print0)
+          ((${#sandboxes[@]} > 0)) || { echo "No packaged chrome-sandbox found" >&2; exit 1; }
+          sudo chown root:root "${sandboxes[@]}"
+          sudo chmod 4755 "${sandboxes[@]}"
       - name: Smoke test packaged application (Linux)
         if: matrix.platform == 'Linux'
         run: xvfb-run -a node scripts/smoke-packaged.js

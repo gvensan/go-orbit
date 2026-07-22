@@ -11,6 +11,7 @@ coverage/
 .dev/
 .recovery-*/
 recovery/
+internals/
 backups/
 *.db
 *.db-wal

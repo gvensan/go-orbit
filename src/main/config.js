@@ -73,7 +73,6 @@ module.exports = {
   },
 
   graph: {
-    forceAtlas2: { iterations: 600, settleAlpha: 0.02, chunkIterations: 30 },
     lodLabelZoom: 1.4,          // labels appear above this zoom
     lodLabelMinDegree: 10,      // ...or for hubs at any zoom
     betweennessCacheTtlMs: 60 * 60 * 1000,

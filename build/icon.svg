@@ -20,23 +20,23 @@
 
   <!-- orbit ring + the contacts riding on it -->
   <g transform="rotate(-22 512 512)">
-    <ellipse cx="512" cy="512" rx="372" ry="156" fill="none" stroke="#33507e" stroke-width="10" opacity="0.85"/>
+    <ellipse cx="512" cy="512" rx="372" ry="156" fill="none" stroke="#33507e" stroke-width="24" opacity="0.95"/>
     <!-- contacts (gender-ring colours from the app) -->
     <g>
-      <circle cx="866" cy="566" r="40" fill="#2a3a5c"/>
-      <circle cx="866" cy="566" r="40" fill="none" stroke="#ff2d95" stroke-width="8"/>
+      <circle cx="866" cy="566" r="46" fill="#2a3a5c"/>
+      <circle cx="866" cy="566" r="46" fill="none" stroke="#ff2d95" stroke-width="15"/>
     </g>
     <g>
-      <circle cx="196" cy="576" r="40" fill="#2a3a5c"/>
-      <circle cx="196" cy="576" r="40" fill="none" stroke="#00c2ff" stroke-width="8"/>
+      <circle cx="196" cy="576" r="46" fill="#2a3a5c"/>
+      <circle cx="196" cy="576" r="46" fill="none" stroke="#00c2ff" stroke-width="15"/>
     </g>
     <g>
-      <circle cx="430" cy="372" r="40" fill="#2a3a5c"/>
-      <circle cx="430" cy="372" r="40" fill="none" stroke="#3f9d76" stroke-width="8"/>
+      <circle cx="430" cy="372" r="46" fill="#2a3a5c"/>
+      <circle cx="430" cy="372" r="46" fill="none" stroke="#3f9d76" stroke-width="15"/>
     </g>
   </g>
 
   <!-- you: the glowing gold centre -->
   <circle cx="512" cy="512" r="104" fill="url(#core)" filter="url(#glow)"/>
-  <circle cx="512" cy="512" r="104" fill="none" stroke="#fff4d0" stroke-width="6" opacity="0.7"/>
+  <circle cx="512" cy="512" r="104" fill="none" stroke="#fff4d0" stroke-width="10" opacity="0.75"/>
 </svg>

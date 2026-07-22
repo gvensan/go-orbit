@@ -11,6 +11,24 @@ const { AppError } = require("../ipc/errors");
 
 const edgeKey = (s, t, type) => `${s}|${t}|${type}`;
 
+/** Pull just the coarse locality (city, state, country) from a contact's fields.
+ *  Geocoded contacts store their address parts inside `locationResolved`
+ *  ({ v, components: { city, state, country, ... } }), not as flat fields - so
+ *  a tooltip can show "Bengaluru, Karnataka, India" instead of the full address.
+ *  Falls back to any flat fields, then to nothing.
+ *  @returns {{ city?: string, state?: string, country?: string }} */
+function localityOf(f) {
+  let comp = {};
+  if (f.locationResolved) {
+    try { comp = JSON.parse(f.locationResolved).components || {}; } catch { comp = {}; }
+  }
+  return {
+    city: comp.city || comp.district || comp.county || f.city,
+    state: comp.state || f.state,
+    country: comp.country || f.country,
+  };
+}
+
 class GraphStore {
   constructor() {
     this.graph = new Graph({ multi: true, type: "mixed" });
@@ -25,7 +43,7 @@ class GraphStore {
     for (const c of contacts) {
       const f = c.fields ? JSON.parse(c.fields) : {};
       this.graph.addNode(c.id, {
-        name: c.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!c.starred,
+        name: c.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!c.starred,
       });
     }
     // Tag the owner ("you") node so the renderer can mark it and centre Home on it.
@@ -57,7 +75,7 @@ class GraphStore {
     if (this.graph.hasNode(contact.id)) return;
     const f = contact.fields || {};
     this.graph.addNode(contact.id, {
-      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
+      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
     });
   }
 
@@ -65,7 +83,7 @@ class GraphStore {
     if (!this.graph.hasNode(contact.id)) return;
     const f = contact.fields || {};
     this.graph.mergeNodeAttributes(contact.id, {
-      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
+      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
     });
   }
 
@@ -103,6 +121,9 @@ class GraphStore {
         gender: attrs.gender,
         location: attrs.location,
         place: attrs.place,
+        city: attrs.city,
+        state: attrs.state,
+        country: attrs.country,
         geo: attrs.geo,
         locationPrecision: attrs.locationPrecision,
         locationSource: attrs.locationSource,

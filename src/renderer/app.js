@@ -53,8 +53,6 @@ const state = {
 
 let graphView, card, palette, explore, find, insights, geomap;
 let lastSnapshot = null;
-/** @type {ReturnType<typeof setTimeout> | null} */
-let arrangeFitTimer = null;
 let currentView = "graph"; // "graph" | "explore" | "find" | "insights" | "settings" | "geomap"
 const CONTENT_VIEWS = ["graph", "explore", "find", "insights", "settings", "geomap"];
 // Drill-down navigation history. Each entry is a restorer for a place we can
@@ -78,7 +76,7 @@ function snapshotLocation() {
     const id = state.selectedId, depth = state.depth, name = state.selectedName || "back";
     return { label: name, run: () => selectContact(id, { depth }) };
   }
-  if (graphView.mode === "full") return { label: "Full network", run: () => showFullGraph() };
+  if (graphView.mode === "mesh") return { label: "Full mesh", run: () => showMeshGraph() };
   return { label: "Home", run: () => goHome() };
 }
 
@@ -110,6 +108,16 @@ function setActiveViewSwitch(id) {
   });
 }
 
+/** The on-canvas Graph|Mesh toggle: `which` is "graph" or "mesh". */
+function setCanvasView(which) {
+  document.querySelectorAll("#canvas-view-toggle button").forEach((el) => {
+    const b = /** @type {HTMLElement} */ (el);
+    const active = b.dataset.canvas === which;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", String(active));
+  });
+}
+
 function showView(view) {
   dismissLanding(); // any explicit view switch leaves the start screen
   if (currentView === "settings" && view !== "settings") disposeSettings($("settings"));
@@ -120,7 +128,8 @@ function showView(view) {
   $("insights").hidden = view !== "insights";
   $("settings").hidden = view !== "settings";
   $("geomap").hidden = view !== "geomap";
-  setActiveViewSwitch(view);
+  // The graph canvas lives under the "Network" umbrella button in the top bar.
+  setActiveViewSwitch(view === "graph" ? "network" : view);
   if (view === "explore") {
     explore.loadSaved().then(() => explore.run());
     explore.focus();
@@ -222,7 +231,7 @@ function goHome() {
   graphView.clearPath();
   resetNav();
   showView("graph");
-  setActiveNav("home");
+  setActiveNav("network");
   // Home centres on you (the owner) when set - that's "who's connected to me" -
   // otherwise on the most-connected hub.
   const owner = graphView.ownerNode();
@@ -233,6 +242,8 @@ function goHome() {
       ? `Home: your whole network - you're at the centre. ${shortcut("K")} to search.`
       : `Home: your whole network. ${shortcut("K")} to search.`);
   }
+  // At large scale focusAll falls back to Mesh; reflect the real mode.
+  setCanvasView(graphView.mode === "mesh" ? "mesh" : "graph");
 }
 
 /** Close the contact card without discarding the surrounding non-graph view. */
@@ -243,15 +254,16 @@ function closeContact() {
   if (currentView === "graph") goHome();
 }
 
-function showFullGraph() {
+function showMeshGraph() {
   state.selectedId = null;
+  state.selectedName = null;
   card.hide();
   resetNav();
   showView("graph");
-  graphView.showFull();
-  setActiveViewSwitch("network");
-  setActiveNav("full-network");
-  showHint("Full network. Drag to arrange (positions persist) · shift-click two people to trace a path.");
+  graphView.showMesh();
+  setActiveNav("network");
+  setCanvasView("mesh");
+  showHint("Full mesh - every contact on the ring, every connection a chord. Click a node to open · shift-click two to trace a path.");
 }
 
 async function selectContact(id, /** @type {{ depth?: number, keepView?: boolean, from?: number, fromName?: string, startRename?: boolean }} */ { depth, keepView, from, fromName, startRename } = {}) {
@@ -479,7 +491,8 @@ async function doBackup() {
 function runCommand(id) {
   const actions = {
     "home": () => goHome(),
-    "full-network": () => showFullGraph(),
+    "network": () => goHome(),
+    "mesh": () => showMeshGraph(),
     "geomap": () => openGeomap(),
     "list": () => openList(),
     "find": () => openFind(),
@@ -546,7 +559,7 @@ function showShortcuts() {
     ["↑ ↓ ↵", "Navigate and open in palette or lists"],
     ["shift-click node", "Shortest path from the selected contact"],
     ["right-click node", "Add a connection"],
-    ["drag node", "Reposition (persists in full-network view)"],
+    ["drag node", "Reposition a node on the canvas"],
     ["?", "This overlay"],
   ];
   for (const [key, what] of rows) {
@@ -977,8 +990,8 @@ async function onDataChanged() {
     const still = await api.contacts.get({ id: state.selectedId });
     if (still) selectContact(state.selectedId);
     else goHome();
-  } else if (graphView.mode === "full") {
-    showFullGraph();
+  } else if (graphView.mode === "mesh") {
+    showMeshGraph();
   } else {
     goHome();
   }
@@ -1074,21 +1087,8 @@ export async function init() {
       selectContact(id, { from: state.selectedId, fromName: state.selectedName });
     },
     onShiftSelect: (id) => shiftSelect(id),
-    onDragEnd: (id, pos) => {
-      if (graphView.mode === "full") {
-        api.graph.savePositions({ positions: { [id]: pos } }).catch(() => {});
-      }
-    },
+    onDragEnd: () => {},
     onNodeMenu: (id, pos) => showConnectionMenu(id, graphView.nameOf(id) ?? "this contact", pos),
-    onAutoArrangeFull: async () => {
-      try {
-        await api.graph.layoutStop({});
-        await api.graph.layoutStart({ reset: true });
-        toast("Auto-arranging the full network…");
-      } catch (err) {
-        toastError(err);
-      }
-    },
   });
   explore = new ExploreView($("explore"), {
     onOpenContact: (id) => selectContact(id),
@@ -1121,8 +1121,17 @@ export async function init() {
       });
       if (!result.ok) throw new Error("That connection no longer exists.");
       graphView.clearHighlight();
-      await refreshAfterCardChange();
-      if (state.selectedId != null) await selectContact(state.selectedId, { keepView: true });
+      await refreshAfterCardChange(); // updates the master model + counts
+      // Re-render the canvas so the removed edge actually disappears: setSnapshot
+      // refreshed graphView.full but not the visible sigma view.
+      if (state.selectedId != null) {
+        if (graphView.mode === "mesh") {
+          graphView.showMesh();                                   // rebuild the ring, edge gone
+          await selectContact(state.selectedId, { keepView: true });
+        } else {
+          await selectContact(state.selectedId, { keepView: false }); // rebuild ego + card
+        }
+      }
       toast(`Deleted the connection to ${other.name}.`);
     },
     onHighlightConnection: (id) => (id != null ? graphView.highlightNode(id) : graphView.clearHighlight()),
@@ -1154,27 +1163,14 @@ export async function init() {
       { label: "Find (query builder)", hint: "advanced search", run: () => openFind() },
       { label: "Explore (facets)", hint: shortcut("L"), run: () => openList() },
       { label: "Keyboard shortcuts", hint: "?", run: () => showShortcuts() },
-      { label: "Show full network", run: () => showFullGraph() },
+      { label: "Show graph (force layout)", run: () => goHome() },
+      { label: "Show full mesh", hint: "circular", run: () => showMeshGraph() },
       {
         label: "Gender rings: all nodes / hovered only",
         hint: "toggle",
         run: () => {
           const mode = graphView.cycleGenderRingMode();
           toast(mode === "all" ? "Gender ring on every node." : "Gender ring on the hovered node only.");
-        },
-      },
-      {
-        label: "Recompute layout",
-        hint: "worker",
-        run: async () => {
-          showFullGraph();
-          try {
-            await api.graph.layoutStop({});
-            await api.graph.layoutStart({ reset: true });
-            toast("Layout settling in the background…");
-          } catch (err) {
-            toastError(err);
-          }
         },
       },
       { label: "Import contacts…", hint: ".vcf .csv .orbit", run: () => startImport() },
@@ -1214,18 +1210,11 @@ export async function init() {
     onCreateContact: (name) => createContact(name),
   });
 
-  api.graph.onLayoutTick((positions) => {
-    graphView.applyExternalPositions(positions);
-    if (graphView.mode !== "full") return;
-    // Worker messages are streamed in chunks. Refit once the stream has been
-    // quiet briefly, rather than making the camera jump on every tick.
-    if (arrangeFitTimer != null) clearTimeout(arrangeFitTimer);
-    arrangeFitTimer = setTimeout(() => graphView.fitCamera(), 250);
-  });
   api.app.onMenu((id) => runCommand(id));
+  // Top-bar "Network" opens the graph canvas (defaulting to the force Graph);
+  // Graph vs Mesh is chosen by the on-canvas toggle below.
   const viewNav = {
-    graph: () => goHome(),
-    network: () => showFullGraph(),
+    network: () => goHome(),
     geomap: () => openGeomap(),
     explore: () => openList(),
     find: () => openFind(),
@@ -1233,6 +1222,11 @@ export async function init() {
   document.querySelectorAll(".view-switch button").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);
     b.addEventListener("click", () => viewNav[b.dataset.view]?.());
+  });
+  // On-canvas Graph|Mesh toggle: swaps the layout without leaving the canvas.
+  document.querySelectorAll("#canvas-view-toggle button").forEach((el) => {
+    const b = /** @type {HTMLElement} */ (el);
+    b.addEventListener("click", () => (b.dataset.canvas === "mesh" ? showMeshGraph() : goHome()));
   });
   document.querySelectorAll("#sidebar .nav-item[data-nav]").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);

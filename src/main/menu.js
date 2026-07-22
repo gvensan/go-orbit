@@ -60,8 +60,8 @@ function buildAppMenu(send, { isDev }) {
     {
       label: "View",
       submenu: [
-        cmd("Graph Home", "home"),
-        cmd("Full Network", "full-network"),
+        cmd("Graph", "home"),
+        cmd("Mesh", "mesh"),
         cmd("Geomap", "geomap"),
         cmd("Explore", "list", "CmdOrCtrl+L"),
         cmd("Find", "find"),

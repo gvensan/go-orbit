@@ -78,15 +78,6 @@ const api = {
     ego: invoke("graph:ego"),
     path: invoke("graph:path"),
     centrality: invoke("graph:centrality"),
-    layoutStart: invoke("graph:layoutStart"),
-    layoutStop: invoke("graph:layoutStop"),
-    savePositions: invoke("graph:savePositions"),
-    // Layout is a streamed event channel, not request/response.
-    onLayoutTick: (cb) => {
-      const listener = (_e, positions) => cb(positions);
-      ipcRenderer.on("graph:layout:tick", listener);
-      return () => ipcRenderer.removeListener("graph:layout:tick", listener);
-    },
   },
   search: {
     query: invoke("search:query"),

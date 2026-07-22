@@ -109,10 +109,8 @@ const exploreScope = (x, n) => ["all", "family", "friends"].includes(x) ? x : v.
 /**
  * @param {{ db: any, graph: import('../graph/store').GraphStore, backupDir: string, key: string,
  *           search: import('../search/service').SearchService,
- *           layout: import('../graph/layout-service').LayoutService,
  *           centrality: import('../graph/centrality-service').CentralityService,
  *           explore: import('../explore/service').ExploreService,
- *           sendLayoutTick: (positions: Record<number, {x: number, y: number}>) => void,
  *           dialog: { openFile: (p: any) => any, saveFile: (p: any) => any },
  *           grantedPaths: Set<string>, dbPath: string, appVersion: string, logPath: string,
  *           restoreLatestAndRelaunch: () => any,
@@ -405,22 +403,6 @@ function buildRegistry(ctx) {
         return ctx.centrality.betweenness();
       },
     },
-    "graph:layoutStart": {
-      validate: v.obj({ reset: v.opt(v.bool) }),
-      handle: (p) => ctx.layout.start(ctx.graph, ctx.sendLayoutTick, { reset: p.reset }),
-    },
-    "graph:layoutStop": {
-      validate: v.obj({}),
-      handle: () => ctx.layout.stop(),
-    },
-    "graph:savePositions": {
-      validate: v.obj({ positions: v.req(v.positions) }),
-      handle: (p) => {
-        ctx.layout.persist(p.positions);
-        return { ok: true };
-      },
-    },
-
     "tags:list": {
       validate: v.obj({}),
       handle: () => tags.list(ctx.db),

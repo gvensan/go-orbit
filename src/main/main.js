@@ -20,7 +20,6 @@ const contactsRepo = require("./db/contacts");
 const { AppError } = require("./ipc/errors");
 const { CentralityService } = require("./graph/centrality-service");
 const { ExploreService } = require("./explore/service");
-const { LayoutService } = require("./graph/layout-service");
 const { GraphStore } = require("./graph/store");
 const { registerIpc } = require("./ipc/registry");
 const { getOrCreateDbKey } = require("./keys");
@@ -38,7 +37,6 @@ const runtime = {
   /** @type {any} */ db: null,
   /** @type {GraphStore | null} */ graph: null,
   /** @type {SearchService | null} */ search: null,
-  /** @type {LayoutService | null} */ layout: null,
   /** @type {CentralityService | null} */ centrality: null,
   /** @type {ExploreService | null} */ explore: null,
   /** @type {NodeJS.Timeout | null} */ backupTimer: null,
@@ -196,7 +194,6 @@ function boot() {
     key: runtime.key,
     log: (m) => log.error(m),
   });
-  runtime.layout = new LayoutService({ db: runtime.db, log: (m) => log.info(m) });
   runtime.centrality = new CentralityService({
     dbPath,
     key: runtime.key,
@@ -214,16 +211,10 @@ function boot() {
       db: runtime.db,
       graph: runtime.graph,
       search: runtime.search,
-      layout: runtime.layout,
       centrality: runtime.centrality,
       explore: runtime.explore,
       backupDir: runtime.backupDir,
       key: runtime.key,
-      sendLayoutTick: (positions) => {
-        if (runtime.window && !runtime.window.isDestroyed()) {
-          runtime.window.webContents.send("graph:layout:tick", positions);
-        }
-      },
       grantedPaths,
       dbPath,
       appVersion: app.getVersion(),
@@ -321,7 +312,6 @@ function restoreSnapshotAndRelaunch(dbPath, target) {
   shuttingDown = true; // teardown must not double-close what we close here
   if (runtime.backupTimer) clearInterval(runtime.backupTimer);
   runtime.search?.terminate().catch(() => {});
-  runtime.layout?.stop();
   dbLayer.checkpointAndClose(runtime.db);
   runtime.db = null;
   dbLayer.replaceDatabaseFile(dbPath, stash);
@@ -361,10 +351,6 @@ function teardown() {
   if (runtime.search) {
     runtime.search.terminate().catch(() => {}); // best-effort; dies with the process anyway
     runtime.search = null;
-  }
-  if (runtime.layout) {
-    runtime.layout.stop();
-    runtime.layout = null;
   }
   runtime.centrality = null; // its worker exits on its own
 

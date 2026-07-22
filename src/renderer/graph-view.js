@@ -1,10 +1,10 @@
 // graph-view.js - the constellation (GRAPH_CANVAS spec). Two modes:
-//   ego  - a contact's N-hop neighborhood, laid out by the renderer-side
-//          web worker (fast, small graphs)
-//   full - the whole network, positions persisted in SQLite; heavy layout
-//          runs in the MAIN-side worker and streams in over graph:layout:tick
-// Plus: node drag (positions saved in full mode), shortest-path highlight,
-// Louvain community coloring, and edge-type filtering from the legend.
+//   ego  - the whole network (or a contact's N-hop neighborhood) laid out by
+//          the renderer-side force worker. This is the "Graph" view.
+//   mesh - every contact on a circle, every connection a straight chord. This
+//          is the "Mesh" view. Deterministic; no worker.
+// Plus: node drag, shortest-path highlight, Louvain community coloring, and
+// edge-type filtering from the legend.
 
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
@@ -68,8 +68,7 @@ export class GraphView {
    * @param {HTMLElement} container
    * @param {{ onSelect: (id: number) => void, onShiftSelect: (id: number) => void,
    *           onDragEnd: (id: number, pos: {x: number, y: number}) => void,
-   *           onNodeMenu?: (id: number, pos: {x: number, y: number}) => void,
-   *           onAutoArrangeFull?: () => void }} handlers
+   *           onNodeMenu?: (id: number, pos: {x: number, y: number}) => void }} handlers
    */
   constructor(container, handlers) {
     this.container = container;
@@ -117,16 +116,8 @@ export class GraphView {
     mmFit.className = "minimap-fit"; mmFit.type = "button"; mmFit.textContent = "⛶"; mmFit.title = "Fit all to view";
     mmFit.setAttribute("aria-label", "Fit all to view");
     mmFit.addEventListener("click", () => this.fitCamera());
-    const mmArrange = document.createElement("button");
-    mmArrange.className = "minimap-arrange"; mmArrange.type = "button"; mmArrange.textContent = "↻";
-    mmArrange.title = "Auto-arrange to reduce overlaps";
-    mmArrange.setAttribute("aria-label", "Auto-arrange graph to reduce overlaps");
-    mmArrange.addEventListener("click", () => {
-      if (this.mode === "full") this.handlers.onAutoArrangeFull?.();
-      else this.autoArrange();
-    });
     mmHide.setAttribute("aria-label", "Hide minimap");
-    this.minimapWrap.append(mmHide, mmFit, mmArrange, this.minimapCanvas);
+    this.minimapWrap.append(mmHide, mmFit, this.minimapCanvas);
     this.minimapShow = document.createElement("button");
     this.minimapShow.className = "minimap-show"; this.minimapShow.type = "button"; this.minimapShow.textContent = "🗺"; this.minimapShow.title = "Show minimap";
     this.minimapShow.addEventListener("click", () => this.setMinimapVisible(true));
@@ -294,7 +285,10 @@ export class GraphView {
     const bits = [];
     const sub = [a.role, a.org, a.gender].filter(Boolean).join(" · ");
     if (sub) bits.push(sub);
-    if (a.place || a.location) bits.push(`📍 ${a.place || a.location}`);
+    // Location: city, state, country only (drop the full geocoded address/place);
+    // fall back to the freeform location if no structured components exist.
+    const locality = [a.city, a.state, a.country].filter(Boolean).join(", ") || a.location;
+    if (locality) bits.push(`📍 ${locality}`);
     // The node's family relationship + mutuals-with-you, computed from the node
     // itself (not the focused centre) so the tooltip reads identically in Graph,
     // Full network, and any focused view. Prefer the family edge to you (owner);
@@ -337,20 +331,42 @@ export class GraphView {
     const na = this.view.getNodeAttributes(node);
     const pos = this.sigma.graphToViewport({ x: na.x, y: na.y });
     this.hoverCard.hidden = false;
-    // Auto-placement: prefer to the right of the node, past its radius + ring;
-    // flip to the left when there isn't room so the card never covers the node.
     let nr;
     try { nr = this.sigma.scaleSize(na.size); } catch { nr = na.size; }
-    const gap = nr + 14;
     const rect = this.container.getBoundingClientRect();
     const cw = this.hoverCard.offsetWidth;
     const ch = this.hoverCard.offsetHeight;
+    const clampX = (x) => Math.max(8, Math.min(x, rect.width - cw - 8));
+    const clampY = (y) => Math.max(8, Math.min(y, rect.height - ch - 8));
+
+    if (this.mode === "mesh") {
+      // The ring nearly fills the viewport HEIGHT, so the only roomy empty space
+      // is the left/right margins - the top/bottom margins are too thin and a
+      // card placed there gets clamped back over the mesh. So always park the
+      // card just BEYOND the circle's left or right edge, level with the node.
+      // Because we clear the ring's widest point, it never covers a chord at any
+      // node height. Side = whichever half the node is on, flipped if it overflows.
+      const c = this.sigma.graphToViewport({ x: 0, y: 0 });
+      const dx = pos.x - c.x, dy = pos.y - c.y;
+      const rPx = Math.hypot(dx, dy); // every node sits on the ring
+      const gap = 16;
+      const right = c.x + rPx + gap;
+      const left = c.x - rPx - gap - cw;
+      let x = dx >= 0 ? right : left;
+      if (x + cw > rect.width - 8) x = left;   // no room right -> go left
+      if (x < 8) x = right;                    // no room left -> go right
+      this.hoverCard.style.left = `${clampX(x)}px`;
+      this.hoverCard.style.top = `${clampY(pos.y - ch / 2)}px`;
+      return;
+    }
+
+    // Auto-placement: prefer to the right of the node, past its radius + ring;
+    // flip to the left when there isn't room so the card never covers the node.
+    const gap = nr + 14;
     let x = pos.x + gap; // right of the node
     if (x + cw > rect.width - 8) x = pos.x - gap - cw; // flip to the left
-    x = Math.max(8, Math.min(x, rect.width - cw - 8));
-    const y = Math.max(8, Math.min(pos.y - 12, rect.height - ch - 8));
-    this.hoverCard.style.left = `${x}px`;
-    this.hoverCard.style.top = `${y}px`;
+    this.hoverCard.style.left = `${clampX(x)}px`;
+    this.hoverCard.style.top = `${clampY(pos.y - 12)}px`;
   }
 
   /** Inbound `introduced` chain: who brought this person into the network. */
@@ -388,7 +404,8 @@ export class GraphView {
       g.addNode(n.id, {
         name: n.name, org: n.org, role: n.role, degree: n.degree,
         gender: n.gender, starred: n.starred, isOwner: n.isOwner, lastInteractionAt: n.lastInteractionAt,
-        location: n.location, place: n.place, deceased: n.deceased,
+        location: n.location, place: n.place,
+        city: n.city, state: n.state, country: n.country, deceased: n.deceased,
         x: n.x, y: n.y,
       });
     }
@@ -486,6 +503,7 @@ export class GraphView {
 
     const centerStr = this.center != null ? String(this.center) : null;
     const hoverOnly = this.genderRingMode === "hover";
+    const mesh = this.mode === "mesh";
     this.view.forEachNode((id, attrs) => {
       if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
       // Node GRAPH coordinates -> viewport (getNodeDisplayData is sigma's
@@ -540,17 +558,19 @@ export class GraphView {
       const ring = GENDER_RING[attrs.gender];
       const drawRing = ring && (!hoverOnly || id === this.hovered);
       if (drawRing) {
-        const rr = r + 3;
+        // On the mesh the beads sit shoulder-to-shoulder, so hug the ring tight
+        // to the bead (and thin it) - a fat offset ring would fuse into a rope.
+        const rr = mesh ? r + 1.2 : r + 3;
         // A thin background gap ring first, so the colored ring stays legible
         // on similarly-colored fills.
         ctx.beginPath();
         ctx.arc(p.x, p.y, rr, 0, 2 * Math.PI);
-        ctx.lineWidth = 3;
+        ctx.lineWidth = mesh ? 1.6 : 3;
         ctx.strokeStyle = this.theme.bg;
         ctx.stroke();
         ctx.beginPath();
         ctx.arc(p.x, p.y, rr, 0, 2 * Math.PI);
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = mesh ? 1.3 : 1.8;
         ctx.strokeStyle = ring;
         ctx.stroke();
       }
@@ -604,24 +624,23 @@ export class GraphView {
         });
       }
     }
-    this.buildView(set, null);
-    this.runEgoLayout();
-    this.fitCamera();
+    this.buildView(set, null, { render: false });
+    this.runEgoLayout(); // paints + frames once the layout settles (no seed flash)
     return set.size;
   }
 
   /** Home: show the WHOLE graph (every node + connection) centred on you.
-   *  For large networks, defer to the persisted full-network layout. */
+   *  Above a scale threshold the force layout is too heavy, so fall back to the
+   *  deterministic circular Mesh (which handles the whole network cheaply). */
   focusAll(centerId) {
     if (!this.full) return;
-    if (this.full.order > 1200) { this.showFull(); return; } // scale guard
+    if (this.full.order > 1200) { this.showMesh(); return; } // scale guard
     this.mode = "ego";
     this.center = centerId;
     this.clearPath();
     const all = new Set(this.full.nodes());
-    this.buildView(all, centerId);
-    this.runEgoLayout();
-    this.fitCamera();
+    this.buildView(all, centerId, { render: false });
+    this.runEgoLayout(); // paints + frames once the layout settles (no seed flash)
   }
 
   nodeColor(id, attrs, isCenter = false) {
@@ -748,23 +767,28 @@ export class GraphView {
       }
       frontier = next;
     }
-    this.buildView(seen, centerId);
-    this.runEgoLayout();
-    this.fitCamera();
+    this.buildView(seen, centerId, { render: false });
+    this.runEgoLayout(); // paints + frames once the layout settles (no seed flash)
   }
 
-  // --------------------------------------------------------------- full --
-  showFull() {
+  // --------------------------------------------------------------- mesh --
+  /** Full-mesh view: every contact evenly spaced on a circle (stable id
+   *  order), every real connection drawn as a straight chord. Deterministic -
+   *  no force pass and nothing streams into it, so it never drifts. The
+   *  emergent shape reflects the actual adjacency (sparse data -> sparse
+   *  chords; dense data -> the classic interconnected mesh). */
+  showMesh() {
     if (!this.full) return;
-    this.mode = "full";
+    this.mode = "mesh";
     this.center = null;
     this.clearPath();
-    const all = new Set(this.full.nodes());
-    this.buildView(all, null, { usePersisted: true });
+    // Stable, deterministic order around the ring: ascending contact id.
+    const ordered = [...this.full.nodes()].sort((a, b) => Number(a) - Number(b));
+    this.buildView(new Set(ordered), null, { layout: "circle" });
     this.fitCamera();
   }
 
-  buildView(idSet, centerId, { usePersisted = false } = {}) {
+  buildView(idSet, centerId, { render = true, layout = null } = {}) {
     this.worker?.terminate();
     this.worker = null;
     // Drop any hover state from the previous view. A stale `hovered` node that
@@ -773,7 +797,20 @@ export class GraphView {
     this.hovered = null;
     const v = this.view;
     v.clear();
-    const R = 100 * Math.sqrt(Math.max(1, idSet.size) / 50);
+    const circle = layout === "circle";
+    // A true ring wants nodes on the perimeter, not scattered by a density
+    // heuristic; scale the radius with node count so a big mesh spreads out.
+    const R = circle
+      ? 60 * Math.sqrt(Math.max(1, idSet.size))
+      : 100 * Math.sqrt(Math.max(1, idSet.size) / 50);
+    // On the ring, cap node radius to the arc spacing between neighbours so
+    // contacts read as distinct beads instead of a fused rope - and so 20k
+    // nodes become a fine ring rather than a solid blob.
+    // Leave a gap between beads so a gender ring can hug each one without the
+    // ring fusing into a solid rope around the circle.
+    const meshCap = circle
+      ? Math.max(1.5, ((2 * Math.PI * R) / Math.max(1, idSet.size)) * 0.34)
+      : Infinity;
     let i = 0;
     for (const id of idSet) {
       const a = this.full.getNodeAttributes(id);
@@ -782,12 +819,11 @@ export class GraphView {
       // both nodes at y=0, and sigma's normalization (zero vertical extent) flings
       // them to opposite corners.
       const angle = (2 * Math.PI * i++) / idSet.size + 0.42;
-      const hasPos = usePersisted && Number.isFinite(a.x) && Number.isFinite(a.y);
       v.addNode(id, {
         label: a.name,
-        x: hasPos ? a.x : isCenter ? 0 : R * Math.cos(angle),
-        y: hasPos ? a.y : isCenter ? 0 : R * Math.sin(angle),
-        size: this.nodeSize(a.degree),
+        x: isCenter ? 0 : R * Math.cos(angle),
+        y: isCenter ? 0 : R * Math.sin(angle),
+        size: Math.min(this.nodeSize(a.degree), meshCap),
         color: this.nodeColor(id, a, isCenter),
         org: a.org,
         gender: a.gender,
@@ -815,7 +851,10 @@ export class GraphView {
     });
     this.syncSparkle();
     this.applyMinimapVisibility();
-    this.sigma.refresh();
+    // Ego views run a force layout right after building. Painting the raw circular
+    // seed here (then letting the worker collapse it) shows a jarring ring "flash",
+    // so those callers pass render:false and let the first settled tick paint.
+    if (render) this.sigma.refresh();
   }
 
   /** Start/stop the owner sparkle animation depending on whether "you" is in view.
@@ -839,31 +878,8 @@ export class GraphView {
     if (this.sparkleRAF != null) { cancelAnimationFrame(this.sparkleRAF); this.sparkleRAF = null; }
   }
 
-  /** Re-seed the visible graph, then settle it with collision-aware forces. */
-  autoArrange() {
-    if (!this.view.order) return;
-    this.worker?.terminate();
-    this.worker = null;
-    const radius = 100 * Math.sqrt(Math.max(1, this.view.order) / 50);
-    const nodes = this.view.nodes();
-    nodes.forEach((id, i) => {
-      const isCenter = this.center != null && id === String(this.center);
-      const angle = (2 * Math.PI * i) / Math.max(1, nodes.length) + 0.42;
-      this.view.mergeNodeAttributes(id, {
-        x: isCenter ? 0 : radius * Math.cos(angle),
-        y: isCenter ? 0 : radius * Math.sin(angle),
-      });
-    });
-    if (this.view.order < 3) {
-      this.sigma.refresh();
-      this.fitCamera();
-      return;
-    }
-    this.runEgoLayout({ fitOnDone: true });
-  }
-
-  runEgoLayout({ fitOnDone = false } = {}) {
-    if (this.view.order < 3) { this.sigma.refresh(); return; }
+  runEgoLayout() {
+    if (this.view.order < 3) { this.sigma.refresh(); this.fitCamera(); return; }
     const nodes = [];
     this.view.forEachNode((id, a) => nodes.push({ id, x: a.x, y: a.y, size: a.size }));
     const edges = [];
@@ -872,27 +888,33 @@ export class GraphView {
     const worker = new Worker(new URL("./layout-worker.js", import.meta.url), { type: "module" });
     this.worker = worker;
     let last = null;
+    let framed = false;
     worker.onmessage = (e) => {
       if (e.data.type === "tick") {
         last = e.data.positions;
-        if (!reducedMotion) this.applyPositions(last);
+        if (!reducedMotion) {
+          this.applyPositions(last);
+          // Frame once the first settled tick lands (the worker runs 30 FA2
+          // iterations before it), so we never frame the raw circular seed.
+          if (!framed) { this.fitCamera(); framed = true; }
+        }
       } else {
         if (last) this.applyPositions(last);
         worker.terminate();
         if (this.worker === worker) this.worker = null;
-        if (fitOnDone) this.fitCamera();
+        this.fitCamera();
       }
     };
+    // Callers no longer paint the seed, so if the worker dies we must still
+    // render the built view rather than leaving the previous one on screen.
+    worker.onerror = () => {
+      if (this.worker !== worker) return;
+      this.worker = null;
+      worker.terminate();
+      this.sigma.refresh();
+      this.fitCamera();
+    };
     worker.postMessage({ nodes, edges });
-  }
-
-  /** Positions streamed from the MAIN-side layout worker (full mode). */
-  applyExternalPositions(positions) {
-    if (this.mode !== "full") return;
-    for (const [id, p] of Object.entries(positions)) {
-      if (this.full?.hasNode(id)) this.full.mergeNodeAttributes(id, { x: p.x, y: p.y });
-    }
-    this.applyPositions(positions);
   }
 
   applyPositions(positions) {
@@ -920,11 +942,12 @@ export class GraphView {
   }
 
   // ---------------------------------------------------- path / analytics --
-  /** Highlight a path (ids in order); switches to full mode if needed. */
+  /** Highlight a path (ids in order); zooms out to the whole network (Mesh) if
+   *  any node on the path isn't in the current view. */
   highlightPath(ids) {
     const strIds = ids.map(String);
-    if (this.mode !== "full" && !strIds.every((id) => this.view.hasNode(id))) {
-      this.showFull();
+    if (!strIds.every((id) => this.view.hasNode(id))) {
+      this.showMesh();
     }
     this.pathNodes = new Set(strIds);
     this.pathEdgePairs = new Set();
