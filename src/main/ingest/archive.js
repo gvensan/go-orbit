@@ -230,6 +230,9 @@ function importArchive(db, { srcPath, passphrase, onDuplicate }) {
     skipped: report.skipped,
     duplicatesFound: report.duplicatesFound,
     schemaVersion: header.schemaVersion,
+    // Local ids of newly inserted contacts, so the caller can run post-import
+    // steps (location resolution) on just this batch. Stripped before IPC.
+    freshIds: [...report.freshIds],
   };
 }
 

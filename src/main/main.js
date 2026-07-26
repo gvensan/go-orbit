@@ -223,6 +223,7 @@ function boot() {
       restoreSnapshotAndRelaunch: (file) => restoreSnapshotAndRelaunch(dbPath, file),
       updateStatus: () => runtime.updater?.status(),
       updateCheck: () => runtime.updater?.check(),
+      updateInstall: () => runtime.updater?.install(),
       dialog: {
         openFile: async ({ filters }) => {
           const r = await dialog.showOpenDialog(runtime.window, {
@@ -255,8 +256,27 @@ function boot() {
     backupDir: runtime.backupDir,
     key: runtime.key,
     log,
+    // Push update-state changes to the renderer for the top-bar hint.
+    notify: (s) => {
+      if (runtime.window && !runtime.window.isDestroyed()) {
+        runtime.window.webContents.send("update:status", s);
+      }
+    },
   });
   runtime.updater.start();
+  // Dev preview: ORBIT_FAKE_UPDATE=ready|downloading pushes a synthetic update
+  // state so the top-bar hint can be seen without a signed packaged release.
+  if (!app.isPackaged && process.env.ORBIT_FAKE_UPDATE) {
+    const phase = process.env.ORBIT_FAKE_UPDATE;
+    runtime.window.webContents.once("did-finish-load", () => {
+      if (runtime.window && !runtime.window.isDestroyed()) {
+        runtime.window.webContents.send("update:status", {
+          supported: true, currentVersion: app.getVersion(),
+          phase, availableVersion: "9.9.9", error: null,
+        });
+      }
+    });
+  }
   Menu.setApplicationMenu(
     buildAppMenu(
       (id) => {

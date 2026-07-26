@@ -9,18 +9,33 @@ export const el = (tag, className, text) => {
 };
 
 /**
- * @param {{ title: string, onClose?: () => void }} opts
+ * @param {{ title: string, onClose?: () => void, maximizable?: boolean }} opts
  * @returns {{ body: HTMLElement, foot: HTMLElement, close: () => void, setTitle: (t: string) => void }}
  */
-export function openModal({ title, onClose }) {
+export function openModal({ title, onClose, maximizable = false }) {
   const overlay = el("div", "modal-overlay");
   const box = el("div", "modal");
   const head = el("div", "modal-head");
   const h2 = el("h2", null, title);
+  const actions = el("div", "modal-head-actions");
+  if (maximizable) {
+    const maxBtn = el("button", "modal-max", "⤢");
+    maxBtn.type = "button";
+    maxBtn.title = "Maximize";
+    maxBtn.setAttribute("aria-label", "Maximize");
+    maxBtn.addEventListener("click", () => {
+      const on = box.classList.toggle("modal--max");
+      maxBtn.textContent = on ? "❐" : "⤢";
+      maxBtn.title = on ? "Restore" : "Maximize";
+      maxBtn.setAttribute("aria-label", maxBtn.title);
+    });
+    actions.append(maxBtn);
+  }
   const x = el("button", null, "✕");
   x.type = "button";
   x.setAttribute("aria-label", "Close");
-  head.append(h2, x);
+  actions.append(x);
+  head.append(h2, actions);
   const body = el("div", "modal-body");
   const foot = el("div", "modal-foot");
   box.append(head, body, foot);

@@ -84,16 +84,19 @@ jobs:
             arch: arm64
             electron_cache: ~/AppData/Local/electron/Cache
             builder_cache: ~/AppData/Local/electron-builder/Cache
-          - platform: Linux
-            os: ubuntu-latest
-            arch: x64
-            electron_cache: ~/.cache/electron
-            builder_cache: ~/.cache/electron-builder
-          - platform: Linux
-            os: ubuntu-24.04-arm
-            arch: arm64
-            electron_cache: ~/.cache/electron
-            builder_cache: ~/.cache/electron-builder
+          # Linux paused for now - focusing on macOS + Windows. Re-enable by
+          # uncommenting these two entries (the Linux-only steps below are
+          # already guarded by `if: matrix.platform == 'Linux'`).
+          # - platform: Linux
+          #   os: ubuntu-latest
+          #   arch: x64
+          #   electron_cache: ~/.cache/electron
+          #   builder_cache: ~/.cache/electron-builder
+          # - platform: Linux
+          #   os: ubuntu-24.04-arm
+          #   arch: arm64
+          #   electron_cache: ~/.cache/electron
+          #   builder_cache: ~/.cache/electron-builder
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -177,10 +180,12 @@ jobs:
             os: windows-latest
             electron_cache: ~/AppData/Local/electron/Cache
             builder_cache: ~/AppData/Local/electron-builder/Cache
-          - platform: Linux
-            os: ubuntu-latest
-            electron_cache: ~/.cache/electron
-            builder_cache: ~/.cache/electron-builder
+          # Linux paused for now - focusing on macOS + Windows. Re-enable by
+          # uncommenting this entry.
+          # - platform: Linux
+          #   os: ubuntu-latest
+          #   electron_cache: ~/.cache/electron
+          #   builder_cache: ~/.cache/electron-builder
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -19,6 +19,16 @@ test("takeBackup produces a verified encrypted snapshot and rotates old ones", (
   assert.equal(dbLayer.listBackups(backupDir).length, 3, "rotation depth not enforced");
 });
 
+test("changeCount rises on writes and is stable across reads", (t) => {
+  const { db } = makeDb(t);
+  const before = dbLayer.changeCount(db);
+  contacts.create(db, { name: "Changer" });
+  const afterWrite = dbLayer.changeCount(db);
+  assert.ok(afterWrite > before, "a write should advance the change count");
+  db.prepare("SELECT COUNT(*) FROM contacts").get(); // a read
+  assert.equal(dbLayer.changeCount(db), afterWrite, "a read must not advance the change count");
+});
+
 test("routine and pre-migration backups share one total retention cap", (t) => {
   const dir = tmpDir(t);
   const backupDir = path.join(dir, "snaps");

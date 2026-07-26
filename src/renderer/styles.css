@@ -171,14 +171,55 @@ button.ghost { background: transparent; }
 }
 #theme-toggle:hover { border-color: var(--faint); }
 
+/* "New version available" hint pill in the top bar. */
+.update-pill {
+  flex: none;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  color: var(--dim);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.update-pill[hidden] { display: none; }
+.update-pill:hover { border-color: var(--faint); color: var(--text); }
+.update-pill.ready {
+  color: var(--success, #54c58b);
+  border-color: color-mix(in srgb, var(--success, #54c58b) 55%, var(--hairline));
+  background: color-mix(in srgb, var(--success, #54c58b) 12%, transparent);
+}
+.update-pill.ready:hover { background: color-mix(in srgb, var(--success, #54c58b) 22%, transparent); }
+
 /* ---- main area ---- */
 #main { flex: 1; display: flex; position: relative; min-height: 0; }
 /* The constellation keeps its dark canvas in both themes (design language:
    the graph is the one luminous element; node/edge colors are tuned for it). */
 #graph-wrap { flex: 1; min-width: 0; position: relative; display: flex; background: var(--graph-bg); }
-#graph-root { flex: 1; min-width: 0; }
+/* Reserve the top toolbar row and the bottom legend strip: the sigma canvas
+   renders only in the band between them, so nodes/labels never hide under the
+   chrome. Applies to every canvas view (graph/mesh/orbit/reach/clusters). */
+#graph-root { flex: 1; min-width: 0; margin: 50px 0 54px; }
 .minimap-canvas { touch-action: none; }
 .graph-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+
+/* Tree view: directional +/- expanders around the active person. */
+.tree-expanders { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.tree-expanders[hidden] { display: none; }
+.tree-exp {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 19px; height: 19px; padding: 0; line-height: 1;
+  font-size: 14px; font-weight: 600;
+  border-radius: 50%; cursor: pointer; pointer-events: auto;
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  color: var(--text);
+  display: flex; align-items: center; justify-content: center;
+}
+.tree-exp:hover { border-color: var(--accent); color: var(--accent); }
+.tree-exp.open { color: var(--dim); }
 
 /* ---- minimap (top-right, pannable) ---- */
 .minimap-wrap {
@@ -194,12 +235,13 @@ button.ghost { background: transparent; }
   border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
 }
 .minimap-hide:hover { color: var(--text); }
-.minimap-fit {
+.minimap-shuffle {
   position: absolute; top: 3px; left: 3px; z-index: 1;
-  width: 17px; height: 17px; padding: 0; line-height: 1; font-size: 11px;
+  width: 17px; height: 17px; padding: 0; line-height: 1; font-size: 12px;
   border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
 }
-.minimap-fit:hover { color: var(--accent); }
+.minimap-shuffle:hover { color: var(--accent); }
+.minimap-shuffle[hidden] { display: none; }
 .minimap-show {
   position: absolute; top: 10px; right: 10px; z-index: 9;
   padding: 5px 9px; font-size: 15px; line-height: 1; cursor: pointer;
@@ -293,6 +335,18 @@ button.ghost { background: transparent; }
   background: var(--hairline);
 }
 .nav-spacer { flex: 1; }
+.nav-item { position: relative; } /* anchor for the update dot */
+.nav-dot {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success, #54c58b);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.nav-dot[hidden] { display: none; }
 .nav-badge {
   margin-left: auto;
   font: 10px/1 ui-monospace, monospace;
@@ -373,13 +427,95 @@ button.ghost { background: transparent; }
 }
 .canvas-view-toggle button.active { background: var(--active); color: var(--text); }
 .canvas-view-toggle button:hover:not(.active) { color: var(--text); }
+/* Thin divider between the layout tabs and the independent fade toggle. */
+.canvas-view-toggle .cv-sep { align-self: stretch; width: 1px; margin: 2px 3px; background: var(--hairline); }
+.canvas-view-toggle .cv-toggle.active { background: var(--active); color: var(--text); }
+/* Orbit ring-metric switch, sits under the canvas toggle (top-left). */
+.orbit-controls {
+  position: absolute;
+  top: 46px;
+  left: 14px;
+  z-index: 6;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.orbit-controls[hidden] { display: none; }
+.orbit-controls label { display: inline-flex; align-items: center; gap: 6px; }
+.orbit-controls select { font-size: 12px; padding: 2px 4px; }
+/* Tree ANCHOR combobox - same top-left slot as the Orbit "rings by" control. */
+.tree-anchor {
+  position: absolute; top: 46px; left: 14px; z-index: 12;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--hairline); border-radius: 7px; padding: 4px 9px; font-size: 12px;
+}
+.tree-anchor[hidden] { display: none; }
+.tree-anchor input {
+  font-size: 12px; padding: 3px 6px; width: 220px;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 5px; color: var(--text);
+}
+.tree-anchor-list {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 8;
+  margin: 0; padding: 4px; list-style: none;
+  min-width: 260px; max-width: 380px; max-height: 320px; overflow-y: auto;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  border: 1px solid var(--hairline); border-radius: 7px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+.tree-anchor-list[hidden] { display: none; }
+.tree-anchor-list li {
+  padding: 5px 9px; border-radius: 5px; cursor: pointer; font-size: 12.5px; white-space: nowrap;
+}
+.tree-anchor-list li.active, .tree-anchor-list li:hover { background: var(--active); color: var(--text); }
+.tree-anchor-list li .lvl { color: var(--dim); margin-right: 6px; }
+.tree-anchor-list li.default-opt { border-bottom: 1px solid var(--hairline); border-radius: 0; margin-bottom: 2px; padding-bottom: 6px; }
+/* Shared zoom controls (all canvas views), centered in the top bar between the
+   layout tabs (left) and the hint text (right). Tree adds expand/collapse after
+   a separator. */
+.canvas-controls {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--hairline);
+}
+.canvas-controls button {
+  border: 0;
+  background: none;
+  color: var(--dim);
+  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.canvas-controls button:hover { color: var(--text); background: color-mix(in srgb, var(--active) 55%, transparent); }
+.canvas-controls .cc-tree { display: inline-flex; align-items: center; gap: 2px; }
+.canvas-controls .cc-tree[hidden] { display: none; }
+.canvas-controls .cc-sep { align-self: stretch; width: 1px; margin: 2px 3px; background: var(--hairline); }
+/* Text-label toggle (Extended mode) - wider than the icon buttons. */
+.canvas-controls .cc-toggle { width: auto; padding: 4px 10px; font-size: 13px; }
+.canvas-controls .cc-toggle.active { background: var(--active); color: var(--text); }
 #graph-hint {
   position: absolute;
   top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: min(70%, 720px);
-  text-align: center;
+  right: 18px;
+  max-width: min(48%, 560px);
+  text-align: right;
   color: var(--faint);
   pointer-events: none;
 }
@@ -429,14 +565,26 @@ button.ghost { background: transparent; }
 #panel {
   width: 380px;
   flex: none;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;       /* the identity + actions stay pinned; .card-scroll scrolls */
   position: relative;
   z-index: 5;             /* sit above the table's composited (will-change) layers */
   isolation: isolate;
   background: var(--panel);
   border-left: 1px solid var(--hairline);
-  padding: 18px;
+  padding: 18px 18px 0;   /* bottom padding lives on the scroll region instead */
+}
+/* Scrolls independently below the pinned identity + action row. The negative
+ * horizontal margin lets the scrollbar hug the panel edge while content keeps
+ * the 18px inset. */
+.card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin: 0 -18px;
+  padding: 2px 18px 18px;
 }
 .panel-close {
   position: absolute;
@@ -463,7 +611,22 @@ button.ghost { background: transparent; }
 }
 .card-name { font-size: 17px; font-weight: 600; margin: 0; }
 .card-sub { color: var(--dim); margin: 2px 0 0; }
-.card-actions { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
+.card-actions { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
+/* Delete as a trash icon; sits at the end of the action row. */
+.card-del {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+}
+.card-del svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.card-del:hover, .card-del:focus-visible { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .card-section { margin-top: 18px; }
 .card-section h3 {
   font-size: 11px;
@@ -514,6 +677,9 @@ button.ghost { background: transparent; }
 .conn-name-plain { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-rel-label { flex: none; font-size: 11px; margin-left: 6px; text-transform: lowercase; }
 .rel-row select { flex: 1; }
+/* Live both-direction kinship preview under the role picker (card). */
+.kin-preview { margin: 3px 0 2px; font-size: 11px; line-height: 1.35; color: var(--faint); }
+.kin-preview[hidden] { display: none; }
 .conn-degree { margin-left: auto; color: var(--faint); }
 .timeline-row { cursor: default; }
 .timeline-when { color: var(--faint); flex: none; width: 84px; }
@@ -1106,6 +1272,15 @@ button.ghost { background: transparent; }
   border-bottom: 1px solid var(--hairline);
 }
 .modal-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.modal-head-actions { display: flex; align-items: center; gap: 4px; }
+.modal-max { line-height: 1; }
+/* Maximized: fill the app area. Body flexes so its own scroll region grows. */
+.modal.modal--max {
+  width: 96vw;
+  height: 94vh;
+  max-height: 94vh;
+}
+.modal.modal--max .modal-body { flex: 1; min-height: 0; }
 .modal-body { padding: 16px; overflow-y: auto; }
 .modal-foot {
   display: flex;
@@ -1114,6 +1289,17 @@ button.ghost { background: transparent; }
   padding: 12px 16px;
   border-top: 1px solid var(--hairline);
 }
+
+/* Checkbox + wrapped label, e.g. the CSV export options popup. */
+.form-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  cursor: pointer;
+  line-height: 1.45;
+}
+.form-check input[type="checkbox"] { margin-top: 3px; flex: none; }
 
 /* ---- forms ---- */
 input[type="text"], input[type="password"], select, textarea {
@@ -1262,7 +1448,53 @@ input[type="date"] { color-scheme: dark; }
 .map-table td { padding: 4px 6px; border-bottom: 1px solid var(--hairline); }
 .report-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin: 12px 0; }
 .report-grid .num { font-size: 22px; font-weight: 600; color: var(--accent); }
+.report-grid .num.num-ok { color: var(--success, #54c58b); }
+.report-grid .num.num-warn { color: var(--amber, #e0a83a); }
 .sample-list { margin: 10px 0 0; padding: 0; list-style: none; color: var(--dim); font-size: 13px; }
+
+/* ---- CSV review table ---- */
+.modal--wide { width: min(1180px, 97vw); }
+.review-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
+.review-head .rv-complete { color: var(--success, #54c58b); }
+.review-head .rv-incomplete { color: var(--amber, #e0a83a); }
+.review-filter { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.review-table-wrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 8px; }
+.review-table { border-collapse: collapse; font-size: 12px; }
+.review-table th { position: sticky; top: 0; background: var(--panel); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--hairline); white-space: nowrap; font-weight: 600; }
+.review-table th .th-hint { font-size: 10px; color: var(--faint); font-weight: 400; }
+.review-table td { padding: 4px 6px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.review-row:hover td { background: color-mix(in srgb, var(--hover) 55%, transparent); }
+.rv-in { width: 100%; min-width: 112px; box-sizing: border-box; font-size: 12px; padding: 3px 5px; }
+.rv-in.invalid { border-color: var(--danger); }
+/* Columns whose values are routinely long: give them room so they don't clip.
+ * The table already scrolls horizontally (.review-table-wrap) when the sum
+ * exceeds the modal width. */
+.rv-name { min-width: 200px; }
+.rv-f-email { min-width: 220px; }
+.rv-f-company, .rv-f-role, .rv-f-nickname { min-width: 150px; }
+.rv-f-website, .rv-f-linkedin, .rv-f-notes { min-width: 200px; }
+/* Phone cell: country dropdown above the national number. */
+.rv-phone { display: flex; flex-direction: column; gap: 4px; min-width: 190px; }
+.rv-phone-country { font-size: 12px; padding: 3px 4px; max-width: 190px; }
+.rv-phone-num { min-width: 0; }
+.review-status { text-align: center; width: 40px; white-space: nowrap; }
+.review-status .status-icon { display: inline-block; width: 14px; }
+.row-warn { color: var(--amber, #e0a83a); cursor: help; }
+.row-ok { color: var(--success, #54c58b); }
+.rv-del { border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 3px; font-size: 12px; margin-left: 4px; border-radius: 4px; }
+.rv-del:hover { color: var(--danger); }
+.warn-tip { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--hairline); border-radius: 7px; padding: 6px 10px; font-size: 12px; color: var(--text); box-shadow: 0 10px 28px rgb(0 0 0 / 0.4); max-width: 280px; pointer-events: none; }
+.warn-tip[hidden] { display: none; }
+.warn-tip div { line-height: 1.5; }
+.rel-wrap, .loc-wrap, .kin-wrap { position: relative; min-width: 130px; }
+.loc-wrap { display: flex; gap: 3px; align-items: center; }
+.loc-pin { flex: none; border: 1px solid var(--hairline); background: var(--panel); border-radius: 5px; padding: 2px 5px; cursor: pointer; }
+.rel-menu, .loc-menu { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; min-width: 180px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px; box-shadow: 0 8px 22px rgb(0 0 0 / 0.35); max-height: 200px; overflow-y: auto; }
+.rel-opt, .loc-opt { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; border: 0; background: none; color: var(--text); padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.rel-opt:hover, .loc-opt:hover { background: var(--hover); }
+.rel-tag { flex: none; }
+.kin-hint { margin-top: 2px; font-size: 10px; }
+.review-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; }
 
 /* ---- dedup / trash rows ---- */
 .pair-row { border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }

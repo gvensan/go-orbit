@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const contacts = require("../src/main/db/contacts");
 const { parseVCard } = require("../src/main/ingest/vcard");
-const { parseCSV, suggestMapping, rowsToContacts } = require("../src/main/ingest/csv");
+const { parseCSV, suggestMapping, rowsToContacts, contactsToCSV, relationshipRowsToCSV } = require("../src/main/ingest/csv");
 const { importContacts } = require("../src/main/ingest/importer");
 const { makeDb } = require("./helpers");
 
@@ -60,6 +60,71 @@ test("CSV: quotes, escapes, mapping heuristics", () => {
   assert.equal(parsed.length, 2);
   assert.equal(parsed[0].name, "Reyes, Johanna");
   assert.deepEqual(parsed[0].tags, ["vip", "alumni"]);
+});
+
+test("CSV export round-trips through the importer", () => {
+  const original = [
+    { name: "Reyes, Johanna", fields: { email: "jo@initech.com", company: "Initech", role: "PM, Core", notes: 'says "hi"\nline two' }, tags: ["vip", "alumni"] },
+    { name: "NoEmail Person", fields: { company: "Globex" }, tags: [] },
+  ];
+  const csv = contactsToCSV(original);
+  // Header matches the import template's column order exactly.
+  assert.equal(csv.split("\r\n")[0], "name,email,phone,company,role,gender,birthday,nickname,website,linkedin,notes,tags");
+
+  const { headers, rows } = parseCSV(csv);
+  const back = rowsToContacts(headers, rows, suggestMapping(headers));
+  assert.equal(back.length, 2);
+  assert.equal(back[0].name, "Reyes, Johanna");
+  assert.equal(back[0].fields.email, "jo@initech.com");
+  assert.equal(back[0].fields.role, "PM, Core");
+  assert.equal(back[0].fields.notes, 'says "hi"\nline two'); // quotes + newline survive
+  assert.deepEqual(back[0].tags, ["vip", "alumni"]);
+  assert.equal(back[1].name, "NoEmail Person");
+  assert.equal(back[1].fields.company, "Globex");
+});
+
+test("CSV detailed export mirrors the Review-step columns", () => {
+  // One contact with two relationships -> two rows; one with none -> one blank row.
+  const rows = [
+    { name: "Adhya", fields: { gender: "Female", location: "Chennai", email: "a@x.io" }, tags: ["core"],
+      relationship: "family", relationshipTo: "Rosa", kinship: "daughter" },
+    { name: "Adhya", fields: { gender: "Female", location: "Chennai", email: "a@x.io" }, tags: ["core"],
+      relationship: "colleague", relationshipTo: "Sam", kinship: "" },
+    { name: "Loner", fields: { gender: "Male" }, tags: [] },
+  ];
+  const csv = relationshipRowsToCSV(rows);
+  const { headers, rows: parsed } = parseCSV(csv);
+  assert.deepEqual(headers.slice(0, 5), ["name", "gender", "relationship", "relationship to", "kinship"]);
+  const col = (r, h) => parsed[r][headers.indexOf(h)];
+  assert.equal(col(0, "relationship"), "family");
+  assert.equal(col(0, "relationship to"), "Rosa");
+  assert.equal(col(0, "kinship"), "daughter");
+  assert.equal(col(0, "gender"), "Female");
+  assert.equal(col(1, "relationship"), "colleague");
+  assert.equal(col(1, "kinship"), ""); // non-family has no kinship
+  assert.equal(col(2, "relationship"), ""); // relationship-less contact still exported
+  assert.equal(col(2, "name"), "Loner");
+});
+
+test("detailed export reads kinship as the contact's own role (real edges)", (t) => {
+  const { contactReviewRows } = require("../src/main/ipc/registry");
+  const edges = require("../src/main/db/edges");
+  const { db } = makeDb(t);
+  const uma = contacts.create(db, { name: "Uma", fields: { gender: "Female" } }).id;
+  const leela = contacts.create(db, { name: "Leelavathy", fields: { gender: "Female" } }).id;
+  // Uma is Leelavathy's daughter; Leelavathy is Uma's mother.
+  edges.create(db, {
+    sourceId: uma, targetId: leela, type: "family", directed: false,
+    metadata: { kin: { [uma]: "daughter", [leela]: "mother" } },
+  });
+  const nameById = new Map([[uma, "Uma"], [leela, "Leelavathy"]]);
+  const umaRows = contactReviewRows(db, contacts.get(db, uma), [], nameById);
+  assert.equal(umaRows.length, 1);
+  assert.equal(umaRows[0].relationshipTo, "Leelavathy");
+  assert.equal(umaRows[0].kinship, "daughter"); // Uma's own role, not "mother"
+  const leelaRows = contactReviewRows(db, contacts.get(db, leela), [], nameById);
+  assert.equal(leelaRows[0].relationshipTo, "Uma");
+  assert.equal(leelaRows[0].kinship, "mother"); // Leelavathy's own role
 });
 
 test("import dedup policies: skip, merge, keepBoth", (t) => {

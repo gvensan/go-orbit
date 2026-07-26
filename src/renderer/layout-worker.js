@@ -9,7 +9,7 @@ import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 
 const CHUNK_ITERATIONS = 30;
-const TOTAL_ITERATIONS = 300;
+const TOTAL_ITERATIONS = 420;
 
 self.onmessage = (e) => {
   const { nodes, edges } = e.data;
@@ -21,9 +21,18 @@ self.onmessage = (e) => {
     }
   }
 
-  // Respect rendered node radii so rerunning the layout actually untangles
-  // overlapping contacts instead of only changing their centres.
-  const settings = { ...forceAtlas2.inferSettings(graph), adjustSizes: true };
+  // Tidier layout: LinLog pulls tightly-connected groups into compact clumps and
+  // pushes unrelated ones apart (less spaghetti); gravity keeps peripheral and
+  // disconnected nodes from drifting off; outbound-attraction gives hubs room;
+  // adjustSizes respects rendered node radii so contacts don't overlap.
+  const settings = {
+    ...forceAtlas2.inferSettings(graph),
+    adjustSizes: true,
+    linLogMode: true,
+    outboundAttractionDistribution: true,
+    gravity: 1.2,
+    scalingRatio: 12,
+  };
   for (let done = 0; done < TOTAL_ITERATIONS; done += CHUNK_ITERATIONS) {
     forceAtlas2.assign(graph, { iterations: CHUNK_ITERATIONS, settings });
     const positions = {};

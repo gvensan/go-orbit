@@ -93,6 +93,14 @@ const api = {
   updates: {
     status: invoke("update:status"),
     check: invoke("update:check"),
+    install: invoke("update:install"),
+    // Streamed update-state changes (checking/downloading/ready/error) so the
+    // renderer can show a live hint. Returns an unsubscribe fn.
+    onStatus: (cb) => {
+      const listener = (_e, state) => cb(state);
+      ipcRenderer.on("update:status", listener);
+      return () => ipcRenderer.removeListener("update:status", listener);
+    },
   },
   dedup: {
     candidates: invoke("dedup:candidates"),
@@ -131,11 +139,14 @@ const api = {
     deleteBackup: invoke("backup:delete"),
     clearAll: invoke("data:clearAll"),
     exportArchive: invoke("export:archive"),
+    exportCsv: invoke("export:csv"),
     exportGraphML: invoke("export:graphml"),
     exportImage: invoke("export:image"),
     importArchive: invoke("import:archive"),
     importPreview: invoke("import:preview"),
     importFile: invoke("import:file"),
+    importParse: invoke("import:parse"),
+    importRecords: invoke("import:records"),
     seedSample: invoke("data:seedSample"),
     sampleStatus: invoke("data:sampleStatus"),
   },

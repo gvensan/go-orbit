@@ -302,13 +302,13 @@ async function openRestorePicker(onDeleted) {
 /**
  * Render the Settings page into a content-pane container.
  * @param {HTMLElement} container
- * @param {{ onExport: () => void, onImport: () => void, onChanged: () => void }} opts
+ * @param {{ onExport: () => void, onExportCsv: () => void, onImport: () => void, onChanged: () => void }} opts
  */
 export async function renderSettings(container, opts) {
   settingsControllers.get(container)?.abort();
   const controller = new AbortController();
   settingsControllers.set(container, controller);
-  const { onExport, onImport, onChanged } = opts;
+  const { onExport, onExportCsv, onImport, onChanged } = opts;
   const rerender = () => renderSettings(container, opts);
 
   let status;
@@ -374,6 +374,16 @@ export async function renderSettings(container, opts) {
     }
   });
   about.append(updateBtn);
+  if (updateStatus.phase === "ready") {
+    const restartBtn = el("button", "primary", `Restart to update${updateStatus.availableVersion ? ` to v${updateStatus.availableVersion}` : ""}`);
+    restartBtn.type = "button";
+    restartBtn.style.marginLeft = "8px";
+    restartBtn.addEventListener("click", async () => {
+      restartBtn.disabled = true;
+      await api().updates.install({}).catch(toastError);
+    });
+    about.append(restartBtn);
+  }
   row(about, "log file", status.logPath);
   row(about, "telemetry", "none - online maps send only viewed areas and location queries");
 
@@ -413,10 +423,14 @@ export async function renderSettings(container, opts) {
   const exportBtn = el("button", null, "Export archive…");
   exportBtn.type = "button";
   exportBtn.addEventListener("click", () => onExport());
+  const exportCsvBtn = el("button", null, "Export CSV…");
+  exportCsvBtn.type = "button";
+  exportCsvBtn.title = "Contacts in the import template's columns (not a full backup)";
+  exportCsvBtn.addEventListener("click", () => onExportCsv());
   const importBtn = el("button", null, "Import…");
   importBtn.type = "button";
   importBtn.addEventListener("click", () => onImport());
-  dataActions.append(exportBtn, importBtn);
+  dataActions.append(exportBtn, exportCsvBtn, importBtn);
   data.append(dataActions);
 
   // --- danger zone: clear everything for a fresh start ---

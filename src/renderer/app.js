@@ -77,6 +77,10 @@ function snapshotLocation() {
     return { label: name, run: () => selectContact(id, { depth }) };
   }
   if (graphView.mode === "mesh") return { label: "Full mesh", run: () => showMeshGraph() };
+  if (graphView.mode === "orbit") return { label: "Orbit", run: () => showOrbitGraph() };
+  if (graphView.mode === "reach") return { label: "Reach", run: () => showReachGraph() };
+  if (graphView.mode === "cluster") return { label: "Clusters", run: () => showClusterGraph() };
+  if (graphView.mode === "tree") return { label: "Tree", run: () => showTreeGraph() };
   return { label: "Home", run: () => goHome() };
 }
 
@@ -108,14 +112,23 @@ function setActiveViewSwitch(id) {
   });
 }
 
-/** The on-canvas Graph|Mesh toggle: `which` is "graph" or "mesh". */
+/** The on-canvas Graph|Mesh|Orbit toggle: `which` is "graph" | "mesh" | "orbit". */
 function setCanvasView(which) {
-  document.querySelectorAll("#canvas-view-toggle button").forEach((el) => {
+  document.querySelectorAll("#canvas-view-toggle button[data-canvas]").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);
     const active = b.dataset.canvas === which;
     b.classList.toggle("active", active);
     b.setAttribute("aria-selected", String(active));
   });
+  $("orbit-controls").hidden = which !== "orbit"; // metric switch is Orbit-only
+  $("tree-controls").hidden = which !== "tree";   // expand/collapse-all is Tree-only
+  $("tree-anchor").hidden = which !== "tree";     // anchor combobox is Tree-only
+  if (which === "tree") refreshTreeAnchor();
+  // The Tree is family-only, so the relationship legend doesn't apply there.
+  // (Cluster keeps it - its meta-edges carry the underlying relationship types.)
+  const noLegend = which === "tree";
+  $("legend").hidden = noLegend;
+  $("legend-gender").hidden = noLegend;
 }
 
 function showView(view) {
@@ -158,6 +171,47 @@ async function refreshAttentionBadge() {
     badge.hidden = n === 0;
     badge.textContent = String(n);
   } catch {}
+}
+
+/** Ambient "new version" hint: a top-bar pill + a dot on the Settings entry.
+ *  Driven by pushed update-state changes from the main-process updater (which
+ *  checks on launch and every few hours). Only surfaces once an update is
+ *  downloading or ready; silent otherwise. */
+let lastUpdateState = null;
+function renderUpdateHint(state) {
+  lastUpdateState = state;
+  const pill = $("update-pill");
+  const dot = $("update-dot");
+  const v = state?.availableVersion ? `v${state.availableVersion}` : "update";
+  const ready = state?.phase === "ready";
+  const downloading = state?.phase === "downloading";
+  const show = ready || downloading;
+  pill.hidden = !show;
+  dot.hidden = !show;
+  pill.classList.toggle("ready", ready);
+  if (!show) return;
+  if (ready) {
+    pill.textContent = `↑ ${v} ready · Restart`;
+    pill.title = "A new version is ready. Click to restart and update now (it also installs automatically on quit).";
+  } else {
+    pill.textContent = `↓ Downloading ${v}…`;
+    pill.title = "A new version is downloading in the background.";
+  }
+}
+
+async function onUpdatePillClick() {
+  const state = lastUpdateState;
+  if (!state) return;
+  if (state.phase === "ready") {
+    const yes = await confirmModal({
+      title: "Restart to update?",
+      message: `Orbit ${state.availableVersion ? "v" + state.availableVersion : ""} is ready. Restart now to install it? Your data is safe - a verified backup was already taken.`,
+      confirmLabel: "Restart & update",
+    });
+    if (yes) await api.updates.install({}).catch(toastError);
+  } else {
+    runCommand("settings"); // downloading: show details in Settings > About
+  }
 }
 
 /** Quiet trust strip: the safety net, visibly working. */
@@ -266,6 +320,128 @@ function showMeshGraph() {
   showHint("Full mesh - every contact on the ring, every connection a chord. Click a node to open · shift-click two to trace a path.");
 }
 
+function orbitHint(metric) {
+  return `Orbit - you at the centre. Rings by ${metric}. Click a node to open.`;
+}
+
+function showOrbitGraph() {
+  state.selectedId = null;
+  state.selectedName = null;
+  card.hide();
+  resetNav();
+  showView("graph");
+  graphView.showOrbit();
+  setActiveNav("network");
+  setCanvasView("orbit");
+  /** @type {HTMLSelectElement} */ ($("orbit-metric")).value = graphView.orbitMetric;
+  showHint(orbitHint(graphView.orbitMetric));
+}
+
+function showReachGraph() {
+  state.selectedId = null;
+  state.selectedName = null;
+  card.hide();
+  resetNav();
+  showView("graph");
+  graphView.showReach();
+  setActiveNav("network");
+  setCanvasView("reach");
+  showHint("Reach - you at the centre, everyone on rings by degrees of separation (1 hop, 2 hops…). Click a node to open.");
+}
+
+function showTreeGraph() {
+  state.selectedId = null;
+  state.selectedName = null;
+  card.hide();
+  resetNav();
+  showView("graph");
+  const n = graphView.showTree();
+  setActiveNav("network");
+  setCanvasView("tree");
+  showHint("Tree - starts at you. Click a person, then the + buttons to expand parents (↑), children (↓), or siblings.");
+}
+
+// --- Tree ANCHOR combobox: re-root the tree on a chosen pair -----------------
+let anchorOptions = [];
+let anchorActiveIdx = -1;
+
+/** Reload the pair list and sync the input to the current anchor. */
+function refreshTreeAnchor() {
+  if (!graphView) return;
+  anchorOptions = graphView.treeAnchorOptions();
+  syncAnchorInput();
+}
+function syncAnchorInput() {
+  const input = /** @type {HTMLInputElement} */ ($("tree-anchor-input"));
+  const cur = graphView.treeAnchor;
+  const opt = cur == null ? null : anchorOptions.find((o) => o.id === cur);
+  input.value = opt ? opt.label : "";
+}
+function renderAnchorList(filter) {
+  const list = $("tree-anchor-list");
+  const input = /** @type {HTMLInputElement} */ ($("tree-anchor-input"));
+  list.innerHTML = "";
+  const f = (filter || "").trim().toLowerCase();
+  const items = [{ id: null, label: "Default view (You)", isDefault: true }];
+  for (const o of anchorOptions) if (!f || o.label.toLowerCase().includes(f)) items.push(o);
+  anchorActiveIdx = -1;
+  items.slice(0, 300).forEach((o, i) => {
+    const li = el("li", o.isDefault ? "default-opt" : null, o.label);
+    li.dataset.id = o.id == null ? "" : String(o.id);
+    const isCur = (o.id == null && graphView.treeAnchor == null) || o.id === graphView.treeAnchor;
+    if (isCur) { li.classList.add("active"); anchorActiveIdx = i; }
+    li.addEventListener("mousedown", (e) => { e.preventDefault(); chooseAnchor(o.id); });
+    list.append(li);
+  });
+  list.hidden = list.children.length === 0;
+  input.setAttribute("aria-expanded", String(!list.hidden));
+}
+function chooseAnchor(id) {
+  const input = /** @type {HTMLInputElement} */ ($("tree-anchor-input"));
+  graphView.setTreeAnchor(id);
+  $("tree-anchor-list").hidden = true;
+  input.setAttribute("aria-expanded", "false");
+  refreshTreeAnchor();
+  input.blur();
+}
+function setupTreeAnchor() {
+  const input = /** @type {HTMLInputElement} */ ($("tree-anchor-input"));
+  const list = $("tree-anchor-list");
+  input.addEventListener("focus", () => { input.select(); renderAnchorList(""); });
+  input.addEventListener("input", () => renderAnchorList(input.value));
+  input.addEventListener("blur", () => setTimeout(() => { list.hidden = true; syncAnchorInput(); }, 130));
+  input.addEventListener("keydown", (e) => {
+    const items = [...list.querySelectorAll("li")];
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length) {
+      e.preventDefault();
+      anchorActiveIdx = e.key === "ArrowDown"
+        ? Math.min(items.length - 1, anchorActiveIdx + 1)
+        : Math.max(0, anchorActiveIdx - 1);
+      items.forEach((li, i) => li.classList.toggle("active", i === anchorActiveIdx));
+      items[anchorActiveIdx]?.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const li = items[anchorActiveIdx];
+      if (li) chooseAnchor(li.dataset.id ? Number(li.dataset.id) : null);
+    } else if (e.key === "Escape") { list.hidden = true; input.blur(); }
+  });
+}
+
+function showClusterGraph() {
+  state.selectedId = null;
+  state.selectedName = null;
+  card.hide();
+  resetNav();
+  showView("graph");
+  graphView.showClusters();
+  setActiveNav("network");
+  setCanvasView("cluster");
+  const n = graphView.clusterMembers.size;
+  showHint(n
+    ? `Clusters - your network grouped into ${n} communit${n === 1 ? "y" : "ies"}. Click a cluster to open it.`
+    : "Clusters - not enough connections yet to detect communities.");
+}
+
 async function selectContact(id, /** @type {{ depth?: number, keepView?: boolean, from?: number, fromName?: string, startRename?: boolean }} */ { depth, keepView, from, fromName, startRename } = {}) {
   try {
     const contact = await api.contacts.get({ id });
@@ -309,6 +485,7 @@ async function selectContact(id, /** @type {{ depth?: number, keepView?: boolean
     // Opening a contact from Explore keeps the table; the card shows beside it.
     if (!keepView && currentView === "graph") {
       graphView.focus(id, state.depth);
+      setCanvasView("graph"); // drilling in is an ego/force view; leave Mesh/Orbit
       showHint(`${contact.name}'s network · ${state.depth} hop${state.depth > 1 ? "s" : ""} · shift-click another node for the path`);
     }
     card.depth = state.depth;
@@ -840,6 +1017,46 @@ async function exportGraphMLFlow() {
   }
 }
 
+/** Pre-export popup: pick plain (template) vs. detailed CSV. Resolves the chosen
+ *  options, or null if the user cancels. */
+function csvExportOptions() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const m = openModal({ title: "Export CSV", onClose: () => settle(null) });
+    m.body.append(el("p", null, "Exports your contacts in the import template's columns (re-imports cleanly)."));
+    const opt = el("label", "form-check");
+    const cb = el("input");
+    cb.type = "checkbox";
+    opt.append(cb, el("span", null, "Include relationships (the import review layout: relationship, relationship to, kinship, gender…) - one row per relationship, for offline analysis. This richer file is not meant for re-import."));
+    m.body.append(opt);
+    const cancel = el("button", null, "Cancel");
+    cancel.type = "button";
+    const ok = el("button", "primary", "Export…");
+    ok.type = "button";
+    m.foot.append(cancel, ok);
+    cancel.addEventListener("click", () => m.close());
+    ok.addEventListener("click", () => { settle({ includeDetails: cb.checked }); m.close(); });
+    ok.focus();
+  });
+}
+
+async function exportCsvFlow() {
+  try {
+    const opts = await csvExportOptions();
+    if (!opts) return;
+    const { path } = await api.dialogs.saveFile({
+      defaultName: opts.includeDetails ? "orbit-contacts-detailed.csv" : "orbit-contacts.csv",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!path) return;
+    const r = await api.data.exportCsv({ destPath: path, includeDetails: opts.includeDetails });
+    toast(`${r.count.toLocaleString()} contact${r.count === 1 ? "" : "s"} written to ${r.path}.`);
+  } catch (err) {
+    toastError(err);
+  }
+}
+
 async function exportImageFlow() {
   try {
     const pngBase64 = graphView.exportPNG();
@@ -911,6 +1128,7 @@ function openSettingsPage() {
   setActiveNav("settings");
   renderSettings($("settings"), {
     onExport: () => exportArchiveFlow(),
+    onExportCsv: () => exportCsvFlow(),
     onImport: () => startImport(),
     onChanged: () => onDataChanged(),
   });
@@ -925,7 +1143,7 @@ function showOnGraph(ids, source = "Explore") {
   }
   pushNav(); // remember the Find/Explore view so Back returns to it
   showView("graph");
-  const n = graphView.focusSet(ids);
+  const n = graphView.focusSet(ids, { pairs: true, expandPartners: true });
   card.hide();
   state.selectedId = null;
   setActiveNav(null);
@@ -992,6 +1210,14 @@ async function onDataChanged() {
     else goHome();
   } else if (graphView.mode === "mesh") {
     showMeshGraph();
+  } else if (graphView.mode === "orbit") {
+    showOrbitGraph();
+  } else if (graphView.mode === "reach") {
+    showReachGraph();
+  } else if (graphView.mode === "cluster") {
+    showClusterGraph();
+  } else if (graphView.mode === "tree") {
+    showTreeGraph();
   } else {
     goHome();
   }
@@ -1089,6 +1315,19 @@ export async function init() {
     onShiftSelect: (id) => shiftSelect(id),
     onDragEnd: () => {},
     onNodeMenu: (id, pos) => showConnectionMenu(id, graphView.nameOf(id) ?? "this contact", pos),
+    // Tree: focus the family under this person (children grouped) and open the
+    // card beside it, without leaving the Tree view.
+    onTreeSelect: (id) => { graphView.treeActivate(id); selectContact(id, { keepView: true }); },
+    onClusterOpen: (memberIds, label) => {
+      pushNav(); // Back returns to the Clusters metagraph
+      showView("graph");
+      setCanvasView("graph"); // expand into a normal member subgraph (re-shows legends)
+      const n = graphView.focusSet(memberIds, { induce: false, nodeScale: 1.9, pairs: true, expandPartners: true });
+      card.hide();
+      state.selectedId = null;
+      setActiveNav("network");
+      showHint(`${label} · ${n} member${n === 1 ? "" : "s"}. Partners linked in pink · Click a node to open · Back returns to clusters.`);
+    },
   });
   explore = new ExploreView($("explore"), {
     onOpenContact: (id) => selectContact(id),
@@ -1128,6 +1367,12 @@ export async function init() {
         if (graphView.mode === "mesh") {
           graphView.showMesh();                                   // rebuild the ring, edge gone
           await selectContact(state.selectedId, { keepView: true });
+        } else if (graphView.mode === "orbit") {
+          graphView.showOrbit();                                  // rebuild the rings, edge gone
+          await selectContact(state.selectedId, { keepView: true });
+        } else if (graphView.mode === "reach") {
+          graphView.showReach();                                  // rebuild the tree, edge gone
+          await selectContact(state.selectedId, { keepView: true });
         } else {
           await selectContact(state.selectedId, { keepView: false }); // rebuild ego + card
         }
@@ -1165,6 +1410,10 @@ export async function init() {
       { label: "Keyboard shortcuts", hint: "?", run: () => showShortcuts() },
       { label: "Show graph (force layout)", run: () => goHome() },
       { label: "Show full mesh", hint: "circular", run: () => showMeshGraph() },
+      { label: "Show orbit rings", hint: "you at centre", run: () => showOrbitGraph() },
+      { label: "Show reach tree", hint: "hops from you", run: () => showReachGraph() },
+      { label: "Show clusters", hint: "communities", run: () => showClusterGraph() },
+      { label: "Show family tree", hint: "by generation", run: () => showTreeGraph() },
       {
         label: "Gender rings: all nodes / hovered only",
         hint: "toggle",
@@ -1224,9 +1473,64 @@ export async function init() {
     b.addEventListener("click", () => viewNav[b.dataset.view]?.());
   });
   // On-canvas Graph|Mesh toggle: swaps the layout without leaving the canvas.
-  document.querySelectorAll("#canvas-view-toggle button").forEach((el) => {
+  document.querySelectorAll("#canvas-view-toggle button[data-canvas]").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);
-    b.addEventListener("click", () => (b.dataset.canvas === "mesh" ? showMeshGraph() : goHome()));
+    b.addEventListener("click", () => {
+      if (b.dataset.canvas === "mesh") showMeshGraph();
+      else if (b.dataset.canvas === "orbit") showOrbitGraph();
+      else if (b.dataset.canvas === "reach") showReachGraph();
+      else if (b.dataset.canvas === "cluster") showClusterGraph();
+      else if (b.dataset.canvas === "tree") showTreeGraph();
+      else goHome();
+    });
+  });
+  // Shared zoom controls (all canvas views).
+  $("zoom-in").addEventListener("click", () => graphView.zoomIn());
+  $("zoom-out").addEventListener("click", () => graphView.zoomOut());
+  $("zoom-fit").addEventListener("click", () => graphView.zoomFit());
+  // Tree-only: reveal the whole family, or collapse back to you.
+  $("tree-expand-all").addEventListener("click", () => graphView.treeExpandAll());
+  $("tree-collapse-all").addEventListener("click", () => graphView.treeCollapseAll());
+  // Tree-only: "Extended" hover mode (vertical lineage vs. sibling-discovery reach).
+  const extBtn = $("tree-extended");
+  const syncExtBtn = () => {
+    extBtn.classList.toggle("active", graphView.treeExtended);
+    extBtn.setAttribute("aria-pressed", String(graphView.treeExtended));
+  };
+  syncExtBtn();
+  extBtn.addEventListener("click", () => { graphView.setTreeExtended(!graphView.treeExtended); syncExtBtn(); });
+  setupTreeAnchor();
+  // Fade-links toggle: dims every connection line so the node structure reads
+  // through the mesh/orbit/reach clutter. Independent of the layout tabs.
+  const fadeBtn = $("edge-fade-toggle");
+  const syncFadeBtn = () => {
+    fadeBtn.classList.toggle("active", graphView.edgeFade);
+    fadeBtn.setAttribute("aria-pressed", String(graphView.edgeFade));
+  };
+  syncFadeBtn();
+  fadeBtn.addEventListener("click", () => {
+    graphView.setEdgeFade(!graphView.edgeFade);
+    syncFadeBtn();
+  });
+  // Orbit ring-metric switch. Betweenness is computed off-thread on demand.
+  const orbitMetricSel = /** @type {HTMLSelectElement} */ ($("orbit-metric"));
+  orbitMetricSel.addEventListener("change", async () => {
+    const metric = orbitMetricSel.value;
+    if (metric === "betweenness") {
+      orbitMetricSel.disabled = true;
+      try {
+        const values = await api.graph.centrality({ metric: "betweenness" });
+        graphView.setOrbitMetric("betweenness", values);
+      } catch (err) {
+        toastError(err);
+        orbitMetricSel.value = graphView.orbitMetric;
+      } finally {
+        orbitMetricSel.disabled = false;
+      }
+    } else {
+      graphView.setOrbitMetric(metric);
+    }
+    showHint(orbitHint(metric));
   });
   document.querySelectorAll("#sidebar .nav-item[data-nav]").forEach((el) => {
     const b = /** @type {HTMLElement} */ (el);
@@ -1269,7 +1573,12 @@ export async function init() {
   $("graph-back").addEventListener("click", () => popNav());
   $("graph-home").addEventListener("click", () => goHome()); // skip straight home
 
-  renderLegend($("legend"), $("legend-gender"), (type) => graphView.toggleEdgeType(type));
+  renderLegend(
+    $("legend"), $("legend-gender"),
+    (type) => graphView.toggleEdgeType(type),
+    (type) => graphView.isolateEdgeType(type),
+    () => graphView.clearIsolate(),
+  );
   $("search-trigger").addEventListener("click", () => palette.open());
   $("btn-setup").addEventListener("click", () => ownerOnboarding({ onDone: async () => { await refreshSnapshot(); goHome(); palette.open(""); } }));
   $("btn-sample-small").addEventListener("click", () => loadSample("small"));
@@ -1319,6 +1628,11 @@ export async function init() {
     refreshBackupStrip();
     refreshAttentionBadge();
   }, 5 * 60 * 1000);
+
+  // Update hint: read the launch-time state, then listen for live changes.
+  $("update-pill").addEventListener("click", () => onUpdatePillClick());
+  api.updates.status({}).then(renderUpdateHint).catch(() => {});
+  api.updates.onStatus(renderUpdateHint);
 
   try {
     const snapshot = await refreshSnapshot();

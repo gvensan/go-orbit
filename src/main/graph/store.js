@@ -36,6 +36,7 @@ class GraphStore {
 
   /** Rebuild from scratch: live contacts, edges with both endpoints live. */
   hydrate(db) {
+    this.db = db; // kept so snapshot() can read live recency/cadence for the Orbit view
     this.graph.clear();
     const contacts = db
       .prepare("SELECT id, name, fields, starred FROM contacts WHERE deleted_at IS NULL")
@@ -111,10 +112,23 @@ class GraphStore {
 
   /** @returns {import('../../shared/types').GraphSnapshot} */
   snapshot() {
+    // Recency + cadence feed the Orbit view's ring radius. Read live from the DB
+    // (a single grouped query each) so logging an interaction reflects on refresh.
+    const lastInteraction = new Map();
+    const cadence = new Map();
+    if (this.db) {
+      for (const r of this.db.prepare("SELECT contact_id AS id, MAX(occurred_at) AS m FROM interactions GROUP BY contact_id").all()) {
+        lastInteraction.set(r.id, r.m);
+      }
+      for (const r of this.db.prepare("SELECT id, cadence_days AS c FROM contacts WHERE deleted_at IS NULL").all()) {
+        if (r.c != null) cadence.set(r.id, r.c);
+      }
+    }
     const nodes = [];
     this.graph.forEachNode((id, attrs) => {
+      const nid = Number(id);
       nodes.push({
-        id: Number(id),
+        id: nid,
         name: attrs.name,
         org: attrs.org,
         role: attrs.role,
@@ -130,6 +144,8 @@ class GraphStore {
         deceased: !!attrs.deceased,
         starred: attrs.starred,
         isOwner: !!attrs.isOwner,
+        lastInteractionAt: lastInteraction.get(nid) ?? null,
+        cadenceDays: cadence.get(nid) ?? null,
         degree: this.graph.degree(id),
       });
     });

@@ -26,8 +26,8 @@ const { seedSample } = require("../db/sample");
 const dedup = require("../dedup/engine");
 const { clearAll } = require("../db/maintenance");
 const { parseVCard } = require("../ingest/vcard");
-const { parseCSV, suggestMapping, rowsToContacts } = require("../ingest/csv");
-const { importContacts } = require("../ingest/importer");
+const { parseCSV, suggestMapping, rowsToContacts, contactsToCSV, relationshipRowsToCSV } = require("../ingest/csv");
+const { importContacts, importRecords } = require("../ingest/importer");
 const { exportArchive, importArchive, readArchive, MAGIC } = require("../ingest/archive");
 const { AppError, toTransportError } = require("./errors");
 const v = require("./validate");
@@ -49,6 +49,26 @@ function requireGranted(ctx, p) {
     throw new AppError("VALIDATION", "Choose the file through the file dialog first.");
   }
   return p;
+}
+
+/**
+ * Flatten a contact and its edges into Review-step rows: one row per incident
+ * edge (contact fields repeated), or a single relationship-less row when it has
+ * none. `kinship` is the contact's OWN role toward the related person (kin[c.id]),
+ * matching what the wizard's kinship dropdown captures.
+ */
+function contactReviewRows(db, c, tags, nameById) {
+  const incident = edges.listFor(db, c.id);
+  if (!incident.length) return [{ name: c.name, fields: c.fields, tags }];
+  return incident.map((e) => {
+    const otherId = e.sourceId === c.id ? e.targetId : e.sourceId;
+    const kinship = e.type === "family" && e.metadata && e.metadata.kin
+      ? (e.metadata.kin[c.id] || "") : "";
+    return {
+      name: c.name, fields: c.fields, tags,
+      relationship: e.type, relationshipTo: nameById.get(otherId) || "", kinship,
+    };
+  });
 }
 
 function detectImportKind(srcPath) {
@@ -94,6 +114,56 @@ function dirty(ctx) {
   if (ctx.explore) ctx.explore.markDirty();
 }
 
+/** Resolve contact locations the same way the UI's location picker does:
+ *  bundled city coords first (offline), then the online geocoder for the rest
+ *  when it's enabled (throttled + capped). Shared by location:backfill and the
+ *  import handlers so imported contacts get the same structured locality
+ *  (city/state/country in `locationResolved`) as contacts created in the UI.
+ *  `ids` narrows the pass to a just-imported batch; null scans everyone. */
+async function backfillLocations(ctx, ids = null) {
+  const rows = ctx.db
+    .prepare("SELECT id, fields FROM contacts WHERE deleted_at IS NULL")
+    .all()
+    .filter((r) => !ids || ids.has(r.id));
+  const upd = ctx.db.prepare("UPDATE contacts SET fields = ?, updated_at = ? WHERE id = ?");
+  let updated = 0;
+  const pending = [];
+  // Offline pass (bundled city coords) commits as one transaction; the
+  // online pass below stays incremental because each row awaits a fetch.
+  ctx.db.transaction(() => {
+    for (const r of rows) {
+      const f = r.fields ? JSON.parse(r.fields) : {};
+      if (!f.location || f.geo) continue;
+      const c = CITY_COORDS[f.location];
+      if (c) {
+        f.geo = `${c[0]},${c[1]}`;
+        f.place = f.location;
+        f.locationPrecision = "city";
+        f.locationSource = "offline-city";
+        upd.run(JSON.stringify(f), Date.now(), r.id); updated++;
+      }
+      else pending.push({ id: r.id, f });
+    }
+  })();
+  if (locationOnline(ctx.db)) {
+    for (const p of pending.slice(0, config.location.backfillOnlineMax)) {
+      const results = await searchCities(p.f.location);
+      if (results[0]) {
+        const hit = results[0];
+        p.f.geo = `${hit.lat},${hit.lon}`;
+        p.f.place = hit.place;
+        p.f.locationPrecision = hit.precision;
+        p.f.locationSource = hit.source;
+        p.f.locationResolved = JSON.stringify({ v: 1, components: hit.components, osm: hit.osm });
+        upd.run(JSON.stringify(p.f), Date.now(), p.id); updated++;
+      }
+      await new Promise((res) => setTimeout(res, config.location.backfillDelayMs)); // be polite to the geocoder
+    }
+  }
+  if (updated) { ctx.graph.hydrate(ctx.db); dirty(ctx); }
+  return { updated };
+}
+
 const strList = (max) => v.arr((x, n) => v.str(x, n, { min: 1, max: 80 }), { max });
 const exploreFilters = v.obj({
   orgs: v.opt(strList(50)),
@@ -115,7 +185,7 @@ const exploreScope = (x, n) => ["all", "family", "friends"].includes(x) ? x : v.
  *           grantedPaths: Set<string>, dbPath: string, appVersion: string, logPath: string,
  *           restoreLatestAndRelaunch: () => any,
  *           restoreSnapshotAndRelaunch: (file: string) => any,
- *           updateStatus: () => any, updateCheck: () => Promise<any> }} ctx
+ *           updateStatus: () => any, updateCheck: () => Promise<any>, updateInstall: () => any }} ctx
  */
 function buildRegistry(ctx) {
   return {
@@ -306,46 +376,7 @@ function buildRegistry(ctx) {
     // when it's enabled (throttled + capped).
     "location:backfill": {
       validate: v.obj({}),
-      handle: async () => {
-        const rows = ctx.db.prepare("SELECT id, fields FROM contacts WHERE deleted_at IS NULL").all();
-        const upd = ctx.db.prepare("UPDATE contacts SET fields = ?, updated_at = ? WHERE id = ?");
-        let updated = 0;
-        const pending = [];
-        // Offline pass (bundled city coords) commits as one transaction; the
-        // online pass below stays incremental because each row awaits a fetch.
-        ctx.db.transaction(() => {
-          for (const r of rows) {
-            const f = r.fields ? JSON.parse(r.fields) : {};
-            if (!f.location || f.geo) continue;
-            const c = CITY_COORDS[f.location];
-            if (c) {
-              f.geo = `${c[0]},${c[1]}`;
-              f.place = f.location;
-              f.locationPrecision = "city";
-              f.locationSource = "offline-city";
-              upd.run(JSON.stringify(f), Date.now(), r.id); updated++;
-            }
-            else pending.push({ id: r.id, f });
-          }
-        })();
-        if (locationOnline(ctx.db)) {
-          for (const p of pending.slice(0, 40)) {
-            const results = await searchCities(p.f.location);
-            if (results[0]) {
-              const hit = results[0];
-              p.f.geo = `${hit.lat},${hit.lon}`;
-              p.f.place = hit.place;
-              p.f.locationPrecision = hit.precision;
-              p.f.locationSource = hit.source;
-              p.f.locationResolved = JSON.stringify({ v: 1, components: hit.components, osm: hit.osm });
-              upd.run(JSON.stringify(p.f), Date.now(), p.id); updated++;
-            }
-            await new Promise((res) => setTimeout(res, 200)); // be polite to the geocoder
-          }
-        }
-        if (updated) { ctx.graph.hydrate(ctx.db); dirty(ctx); }
-        return { updated };
-      },
+      handle: () => backfillLocations(ctx),
     },
 
     "interactions:list": {
@@ -442,6 +473,10 @@ function buildRegistry(ctx) {
     "update:check": {
       validate: v.obj({}),
       handle: () => ctx.updateCheck(),
+    },
+    "update:install": {
+      validate: v.obj({}),
+      handle: () => ctx.updateInstall(),
     },
     "backup:status": {
       validate: v.obj({}),
@@ -711,6 +746,42 @@ function buildRegistry(ctx) {
         return { path: r.path, ok: r.ok };
       },
     },
+    // Contacts CSV in the import template's columns (round-trips through the
+    // wizard). With includeDetails, appends relationship/kinship + extra columns
+    // for offline analysis - that richer file is a dump, not a re-import template.
+    "export:csv": {
+      validate: v.obj({
+        destPath: v.req((x, n) => v.str(x, n, { min: 1, max: 4096 })),
+        includeDetails: v.opt(v.bool),
+      }),
+      handle: (p) => {
+        requireGranted(ctx, p.destPath);
+        const list = contacts.list(ctx.db);
+        const tagsByContact = new Map();
+        for (const t of ctx.db
+          .prepare(
+            `SELECT ct.contact_id AS id, t.name
+               FROM contact_tags ct
+               JOIN tags t ON t.id = ct.tag_id
+               JOIN contacts c ON c.id = ct.contact_id AND c.deleted_at IS NULL
+              ORDER BY t.name`
+          )
+          .all()) {
+          if (!tagsByContact.has(t.id)) tagsByContact.set(t.id, []);
+          tagsByContact.get(t.id).push(t.name);
+        }
+        if (p.includeDetails) {
+          const nameById = new Map(list.map((c) => [c.id, c.name]));
+          const rows = list.flatMap((c) =>
+            contactReviewRows(ctx.db, c, tagsByContact.get(c.id) || [], nameById));
+          fs.writeFileSync(p.destPath, relationshipRowsToCSV(rows));
+        } else {
+          const rows = list.map((c) => ({ name: c.name, fields: c.fields, tags: tagsByContact.get(c.id) || [] }));
+          fs.writeFileSync(p.destPath, contactsToCSV(rows));
+        }
+        return { path: p.destPath, ok: true, count: list.length };
+      },
+    },
     "import:archive": {
       validate: v.obj({
         srcPath: v.req((x, n) => v.str(x, n, { min: 1, max: 4096 })),
@@ -719,14 +790,16 @@ function buildRegistry(ctx) {
           ["skip", "merge", "keepBoth"].includes(x) ? x : v.fail(`${n} must be skip|merge|keepBoth.`)
         ),
       }),
-      handle: (p) => {
+      handle: async (p) => {
         requireGranted(ctx, p.srcPath);
         // Guardrail: snapshot BEFORE importing, same as migrations. Import is
         // the other bulk write that can trash a good DB.
         takeBackup(ctx.db, ctx.backupDir, { key: ctx.key });
-        const report = importArchive(ctx.db, p);
+        const { freshIds, ...report } = importArchive(ctx.db, p);
         ctx.graph.hydrate(ctx.db);
         dirty(ctx);
+        // Imported locations get the same resolution as UI-created ones.
+        await backfillLocations(ctx, new Set(freshIds));
         return report;
       },
     },
@@ -778,17 +851,70 @@ function buildRegistry(ctx) {
           ["skip", "merge", "keepBoth"].includes(x) ? x : v.fail(`${n} must be skip|merge|keepBoth.`)
         ),
       }),
-      handle: (p) => {
+      handle: async (p) => {
         requireGranted(ctx, p.srcPath);
         takeBackup(ctx.db, ctx.backupDir, { key: ctx.key }); // snapshot before bulk write
         const parsed = parseForImport(p.srcPath, p.kind, p.mapping);
         const r = importContacts(ctx.db, parsed, { onDuplicate: p.onDuplicate });
         ctx.graph.hydrate(ctx.db);
         dirty(ctx);
+        // Imported locations get the same resolution as UI-created ones.
+        await backfillLocations(ctx, r.freshIds);
         return {
           imported: r.imported, merged: r.merged, skipped: r.skipped,
           duplicatesFound: r.duplicatesFound, schemaVersion: 1,
         };
+      },
+    },
+
+    // Reviewed-and-edited records from the CSV import table: contacts plus the
+    // family relationships captured there.
+    "import:records": {
+      validate: v.obj({
+        onDuplicate: v.req((x, n) =>
+          ["skip", "merge", "keepBoth"].includes(x) ? x : v.fail(`${n} must be skip|merge|keepBoth.`)
+        ),
+        records: v.req(v.arr((x, n) => {
+          if (typeof x?.name !== "string" || !x.name.trim()) v.fail(`${n}.name is required.`);
+          const rec = { name: x.name, fields: x.fields ? v.fields(x.fields, `${n}.fields`) : {}, tags: [] };
+          if (Array.isArray(x.tags)) rec.tags = x.tags.filter((t) => typeof t === "string").slice(0, 64);
+          if (x.rel && typeof x.rel === "object") {
+            const T = ["colleague", "friend", "acquaintance", "family", "introduced"];
+            rec.rel = {
+              type: T.includes(x.rel.type) ? x.rel.type : v.fail(`${n}.rel.type must be a relationship type.`),
+              role: v.str(x.rel.role ?? "", `${n}.rel.role`, { max: 40 }),
+              recip: x.rel.recip == null ? null : v.str(x.rel.recip, `${n}.rel.recip`, { max: 40 }),
+              existingId: x.rel.existingId == null ? undefined : v.id(x.rel.existingId, `${n}.rel.existingId`),
+              batchIndex: x.rel.batchIndex == null ? undefined : v.int(x.rel.batchIndex, `${n}.rel.batchIndex`, { min: 0 }),
+            };
+          }
+          return rec;
+        }, { max: 20000 })),
+      }),
+      handle: async (p) => {
+        takeBackup(ctx.db, ctx.backupDir, { key: ctx.key }); // snapshot before bulk write
+        const r = importRecords(ctx.db, p.records, { onDuplicate: p.onDuplicate });
+        ctx.graph.hydrate(ctx.db);
+        dirty(ctx);
+        // idMap covers fresh AND merged rows; merges can fill a blank location.
+        await backfillLocations(ctx, new Set(r.idMap.values()));
+        return {
+          imported: r.imported, merged: r.merged, skipped: r.skipped,
+          duplicatesFound: r.duplicatesFound, relationships: r.relationships, schemaVersion: 1,
+        };
+      },
+    },
+
+    // All parsed+mapped rows, so the renderer can show the editable review table.
+    "import:parse": {
+      validate: v.obj({
+        srcPath: v.req((x, n) => v.str(x, n, { min: 1, max: 4096 })),
+        kind: v.req((x, n) => (x === "vcard" || x === "csv" ? x : v.fail(`${n} must be vcard|csv.`))),
+        mapping: v.opt(v.metadata),
+      }),
+      handle: (p) => {
+        requireGranted(ctx, p.srcPath);
+        return { rows: parseForImport(p.srcPath, p.kind, p.mapping) };
       },
     },
 
@@ -882,4 +1008,4 @@ function registerIpc(
   return Object.keys(registry);
 }
 
-module.exports = { buildRegistry, registerIpc };
+module.exports = { buildRegistry, registerIpc, contactReviewRows };

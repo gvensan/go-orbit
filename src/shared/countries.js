@@ -86,4 +86,72 @@ function parsePhone(value) {
   return { country: best, national: digits.slice(best.dial.length) };
 }
 
-module.exports = { COUNTRIES, flagEmoji, parsePhone };
+const dialOf = (iso2) => (COUNTRIES.find((c) => c.iso2 === iso2) || { dial: "" }).dial;
+
+// National-number groupings for a readable format. Countries not listed fall
+// back to a generic 3-digit grouping (first group holds the remainder).
+const PHONE_GROUPS = { IN: [5, 5], US: [3, 3, 4], CA: [3, 3, 4] };
+
+/** Space-group national digits, e.g. IN "9812345678" -> "98123 45678". */
+function groupNational(iso2, national) {
+  const nat = String(national ?? "").replace(/\D/g, "");
+  const pat = PHONE_GROUPS[iso2];
+  if (pat && pat.reduce((a, b) => a + b, 0) === nat.length) {
+    const out = [];
+    let i = 0;
+    for (const g of pat) { out.push(nat.slice(i, i + g)); i += g; }
+    return out.join(" ");
+  }
+  if (nat.length <= 4) return nat;
+  const first = nat.length % 3 || 3; // keep trailing groups as clean triples
+  const parts = [nat.slice(0, first)];
+  for (let i = first; i < nat.length; i += 3) parts.push(nat.slice(i, i + 3));
+  return parts.join(" ");
+}
+
+/**
+ * Split a raw phone string into { iso2, dial, national }, or null when it can't
+ * be confidently normalized (so junk like extensions is left untouched).
+ *   - "+<dial>..."  -> longest dial-code match
+ *   - "00<dial>..." -> treated as "+<dial>..."
+ *   - no country code -> `defaultIso` (India), for clean 10-digit / 0-11 / 91-12 forms
+ * @param {string} value
+ * @param {{ defaultIso?: string }} [opts]
+ */
+function normalizePhone(value, { defaultIso = "IN" } = {}) {
+  let raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^00\d/.test(raw)) raw = "+" + raw.slice(2); // international access prefix
+  if (raw.startsWith("+")) {
+    const p = parsePhone(raw);
+    return p ? { iso2: p.country.iso2, dial: p.country.dial, national: p.national } : null;
+  }
+  const d = raw.replace(/\D/g, "");
+  if (defaultIso === "IN") {
+    // Clean Indian forms only; anything else is left alone rather than mis-tagged.
+    if (d.length === 10) return { iso2: "IN", dial: "91", national: d };
+    if (d.length === 11 && d[0] === "0") return { iso2: "IN", dial: "91", national: d.slice(1) };
+    if (d.length === 12 && d.startsWith("91")) return { iso2: "IN", dial: "91", national: d.slice(2) };
+    return null;
+  }
+  // Non-India default (an explicit UI country pick): prefix a plausible number.
+  const dial = dialOf(defaultIso);
+  if (dial && d.length >= 4 && d.length <= 14) return { iso2: defaultIso, dial, national: d };
+  return null;
+}
+
+/**
+ * Standardize a phone string to "+<dial> <grouped national>", e.g.
+ * "9880749181" -> "+91 98807 49181", "+14085551234" -> "+1 408 555 1234".
+ * Returns the trimmed original untouched when it can't be normalized.
+ * @param {string} value
+ * @param {{ defaultIso?: string }} [opts]
+ */
+function formatPhone(value, opts) {
+  const n = normalizePhone(value, opts);
+  if (!n) return String(value ?? "").trim();
+  const grouped = groupNational(n.iso2, n.national);
+  return grouped ? `+${n.dial} ${grouped}` : `+${n.dial}`;
+}
+
+module.exports = { COUNTRIES, flagEmoji, parsePhone, dialOf, groupNational, normalizePhone, formatPhone };

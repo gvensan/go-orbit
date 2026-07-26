@@ -55,6 +55,20 @@ export function reciprocalRole(role, otherGender) {
   }
 }
 
+/** Both-direction summary of a kinship role, for entry previews. `role` is
+ *  `selfName`'s role toward `otherName`; `otherGender` phrases the reciprocal.
+ *  Uses the SAME reciprocalRole() that gets stored, so it can never disagree with
+ *  the saved data. e.g. "Uma is Leelavathy's daughter · Leelavathy is Uma's mother".
+ *  Returns "" when no role is picked. */
+export function kinPreview({ selfName, otherName, role, otherGender }) {
+  if (!role) return "";
+  const a = String(selfName || "they").trim().split(/\s+/)[0] || "they";
+  const b = String(otherName || "them").trim().split(/\s+/)[0] || "them";
+  const forward = `${a} is ${b}'s ${role}`;
+  const recip = reciprocalRole(role, otherGender);
+  return recip ? `${forward}  ·  ${b} is ${a}'s ${recip}` : forward;
+}
+
 const ORG_COLORS = [
   "#7aa2f7", "#e0af68", "#9ece6a", "#f7768e",
   "#bb9af7", "#2ac3de", "#ff9e64", "#73daca",

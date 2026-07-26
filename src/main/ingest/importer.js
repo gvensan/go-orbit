@@ -4,6 +4,7 @@
 // archive import can remap edges.
 
 const contactsRepo = require("../db/contacts");
+const edgesRepo = require("../db/edges");
 const { upsertSearchRow } = require("../db/search-projection");
 
 const normEmail = (e) => (e || "").trim().toLowerCase();
@@ -114,4 +115,55 @@ function importContacts(db, incoming, { onDuplicate }) {
   return report;
 }
 
-module.exports = { importContacts, findDuplicate, buildIndex };
+/**
+ * Import reviewed records: contacts (same dedup as importContacts) PLUS the
+ * family relationships captured in the review table. Each record may carry a
+ * `rel` linking it to another contact - an existing one (`existingId`) or
+ * another row in this batch (`batchIndex`) - with the kinship role already
+ * resolved on the client (role + reciprocal). Runs after the shared pre-import
+ * backup.
+ *
+ * @param {any} db
+ * @param {{ name: string, fields?: Record<string,string>, tags?: string[],
+ *           rel?: { type: string, role?: string, recip?: string|null, existingId?: number, batchIndex?: number } }[]} records
+ * @param {{ onDuplicate: "skip" | "merge" | "keepBoth" }} opts
+ */
+function importRecords(db, records, opts) {
+  const { onDuplicate } = opts;
+  const incoming = records.map((r, i) => ({
+    name: r.name, fields: r.fields ?? {}, tags: r.tags ?? [], externalId: i,
+  }));
+  const report = importContacts(db, incoming, { onDuplicate }); // report.idMap: index -> local id
+
+  let relationships = 0;
+  const relTx = db.transaction(() => {
+    records.forEach((r, i) => {
+      const rel = r.rel;
+      if (!rel || !rel.type) return;
+      const selfId = report.idMap.get(i);
+      if (selfId == null) return;
+      const relatedId = rel.existingId != null
+        ? rel.existingId
+        : (rel.batchIndex != null ? report.idMap.get(rel.batchIndex) : null);
+      if (relatedId == null || relatedId === selfId) return;
+      // Kinship metadata only for family; "introduced" is directed (self -> related).
+      let metadata;
+      if (rel.type === "family" && rel.role) {
+        const kin = { [selfId]: rel.role };
+        if (rel.recip) kin[relatedId] = rel.recip;
+        metadata = { kin };
+      }
+      try {
+        edgesRepo.create(db, {
+          sourceId: selfId, targetId: relatedId, type: rel.type,
+          directed: rel.type === "introduced", metadata,
+        });
+        relationships++;
+      } catch { /* already linked or endpoint gone - skip, don't abort the batch */ }
+    });
+  });
+  relTx();
+  return { ...report, relationships };
+}
+
+module.exports = { importContacts, importRecords, findDuplicate, buildIndex };

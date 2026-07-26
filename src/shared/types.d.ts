@@ -117,6 +117,8 @@ export interface GraphNode {
   isOwner?: boolean;
   /** Most recent interaction, for hover cards and recency cues. */
   lastInteractionAt?: Timestamp | null;
+  /** "Stay in touch every N days"; null = no cadence. Feeds the Orbit view. */
+  cadenceDays?: number | null;
   degree: number;
   /** Layout position, when computed/cached. */
   x?: number;
@@ -406,6 +408,10 @@ export interface ImportReport {
   skipped: number;
   duplicatesFound: number;
   schemaVersion: number;
+  /** Local ids of newly inserted contacts, for post-import steps (location
+   *  resolution). Present on the internal importArchive return only; the IPC
+   *  handlers strip it before responding. */
+  freshIds?: number[];
 }
 
 /** What the import wizard shows before committing. */
@@ -485,6 +491,7 @@ export interface IpcContract {
   "backup:now": { request: {}; response: BackupResult };
   "update:status": { request: {}; response: UpdateStatus };
   "update:check": { request: {}; response: UpdateStatus };
+  "update:install": { request: {}; response: { ok: boolean } };
   "backup:status": { request: {}; response: AppStatus };
   /** Wipe ALL data for a fresh start (a safety backup is taken first). */
   "data:clearAll": { request: {}; response: { contacts: number } };
@@ -513,6 +520,7 @@ export interface IpcContract {
   /** PNG bytes come from the renderer's canvas; main writes the granted path. */
   "export:image": { request: { destPath: string; pngBase64: string }; response: { path: string; ok: boolean } };
   "export:archive": { request: ExportOptions; response: { path: string; ok: boolean } };
+  "export:csv": { request: { destPath: string; includeDetails?: boolean }; response: { path: string; ok: boolean; count: number } };
   "import:archive": { request: ImportOptions; response: ImportReport };
 
   "import:preview": { request: { srcPath: string; passphrase?: string }; response: ImportPreview };
@@ -524,6 +532,22 @@ export interface IpcContract {
       onDuplicate: "skip" | "merge" | "keepBoth";
     };
     response: ImportReport;
+  };
+  "import:parse": {
+    request: { srcPath: string; kind: "vcard" | "csv"; mapping?: Record<string, string> };
+    response: { rows: { name: string; fields: ContactFields; tags?: string[] }[] };
+  };
+  "import:records": {
+    request: {
+      onDuplicate: "skip" | "merge" | "keepBoth";
+      records: {
+        name: string;
+        fields?: Record<string, string>;
+        tags?: string[];
+        rel?: { type: string; role?: string; recip?: string | null; existingId?: number; batchIndex?: number };
+      }[];
+    };
+    response: ImportReport & { relationships: number };
   };
 
   "dialog:openFile": {
@@ -621,6 +645,9 @@ export interface RendererApi {
   updates: {
     status: Call<"update:status">;
     check: Call<"update:check">;
+    install: Call<"update:install">;
+    /** Subscribe to streamed update-state changes; returns an unsubscribe fn. */
+    onStatus: (cb: (state: UpdateStatus) => void) => () => void;
   };
   dedup: {
     candidates: Call<"dedup:candidates">;
@@ -659,11 +686,14 @@ export interface RendererApi {
     deleteBackup: Call<"backup:delete">;
     clearAll: Call<"data:clearAll">;
     exportArchive: Call<"export:archive">;
+    exportCsv: Call<"export:csv">;
     exportGraphML: Call<"export:graphml">;
     exportImage: Call<"export:image">;
     importArchive: Call<"import:archive">;
     importPreview: Call<"import:preview">;
     importFile: Call<"import:file">;
+    importParse: Call<"import:parse">;
+    importRecords: Call<"import:records">;
     seedSample: Call<"data:seedSample">;
     sampleStatus: Call<"data:sampleStatus">;
   };

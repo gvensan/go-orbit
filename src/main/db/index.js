@@ -101,15 +101,34 @@ function restoreNewestGoodBackup(
   return false;
 }
 
+/** Total row changes (INSERT/UPDATE/DELETE) on this connection since it opened.
+ *  A monotonic "something changed" signal - reads never bump it. Used to skip a
+ *  periodic backup when the database is untouched since the last one. */
+function changeCount(db) {
+  return db.prepare("SELECT total_changes() AS n").pluck().get();
+}
+
 function startBackupScheduler(
   db,
   backupDir,
   /** @type {{ key?: string, log?: (m: string) => void, onError?: (e: Error) => void }} */
   { key, log = () => {}, onError = () => {} } = {}
 ) {
+  // Baseline: the change count when scheduling started (boot). A tick only
+  // snapshots when this grows, so an idle app doesn't churn identical backups.
+  // The single-writer guardrail means every data change flows through `db`, so
+  // total_changes() sees all of it. Event-driven backups (import/migration/
+  // manual/exit) stay unconditional; only the periodic tick is change-gated.
+  let lastMark = changeCount(db);
   const tick = () => {
     try {
+      const mark = changeCount(db);
+      if (config.backup.onlyWhenChanged && mark === lastMark) {
+        log("[backup] skipped (no changes since last backup)");
+        return;
+      }
       const f = takeBackup(db, backupDir, { key });
+      lastMark = mark;
       log(`[backup] ${path.basename(f)}`);
     } catch (e) {
       onError(e);
@@ -257,4 +276,5 @@ module.exports = {
   snapshotInfo,
   replaceDatabaseFile,
   startBackupScheduler,
+  changeCount,
 };

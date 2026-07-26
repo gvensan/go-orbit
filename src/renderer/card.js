@@ -5,9 +5,9 @@
 // immediately. Delete is undo-first.
 
 import { CITIES, CITY_COORDS } from "../shared/cities.js";
-import { COUNTRIES, flagEmoji, parsePhone } from "../shared/countries.js";
+import { COUNTRIES, flagEmoji, parsePhone, dialOf, groupNational } from "../shared/countries.js";
 import { AUTOCOMPLETE_FIELDS, PRESET_VALUES, fieldType, validateField } from "../shared/field-types.js";
-import { EDGE_COLORS, EDGE_TYPES, initials, kinRolesFor, orgColor, reciprocalRole } from "./colors.js";
+import { EDGE_COLORS, EDGE_TYPES, initials, kinPreview, kinRolesFor, orgColor, reciprocalRole } from "./colors.js";
 import { confirmModal, el } from "./modal.js";
 import { pickLocationOnMap } from "./location-picker.js";
 import { toast, toastError } from "./toast.js";
@@ -120,14 +120,15 @@ function createPhoneControl(value) {
   }
 
   wrap.append(sel, area, num);
-  const dialOf = (iso) => (COUNTRIES.find((c) => c.iso2 === iso) || { dial: "" }).dial;
   sel.addEventListener("change", () => localStorage.setItem("orbit-phone-country", sel.value));
   return {
     element: wrap,
+    // Standardized "+<dial> <grouped national>", e.g. "+91 98807 49181".
     read: () => {
       const a = area.value.replace(/[^\d]/g, "");
       const n = num.value.replace(/[^\d]/g, "");
-      return a || n ? `+${dialOf(sel.value)}${a}${n}` : "";
+      const nat = a + n;
+      return nat ? `+${dialOf(sel.value)} ${groupNational(sel.value, nat)}` : "";
     },
     focus: () => num.focus(),
     setInvalid: (b) => num.classList.toggle("invalid", b),
@@ -244,7 +245,7 @@ export class ContactCard {
   render() {
     const { contact } = this;
     const { neighbors, interactions, tags } = this.context;
-    const p = this.panel;
+    let p = this.panel;
     p.innerHTML = "";
     this.appendClose(p);
     this.buildDatalists(p);
@@ -306,8 +307,26 @@ export class ContactCard {
     mkBtn("Link…", null, () => this.handlers.onAddRelationship(contact));
     mkBtn("Add connection ▾", null, (e) =>
       this.handlers.onAddConnection(contact, /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect()));
-    mkBtn("Delete", "danger", () => this.handlers.onDelete(contact));
+    // Delete as a trash icon (same glyph as the per-connection delete).
+    const delBtn = el("button", "card-del");
+    delBtn.type = "button";
+    delBtn.title = `Delete ${contact.name}`;
+    delBtn.setAttribute("aria-label", `Delete ${contact.name}`);
+    const delIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    delIcon.setAttribute("viewBox", "0 0 24 24");
+    delIcon.setAttribute("aria-hidden", "true");
+    const delUse = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    delUse.setAttribute("href", "#nav-trash");
+    delIcon.append(delUse);
+    delBtn.append(delIcon);
+    delBtn.addEventListener("click", () => this.handlers.onDelete(contact));
+    actions.append(delBtn);
     p.append(actions);
+
+    // Everything below the action row scrolls; the identity + actions stay pinned.
+    const body = el("div", "card-scroll");
+    p.append(body);
+    p = body;
 
     // --- gender first: the first field worth setting (it drives the kinship
     // options below), so it sits at the very top and commits on selection. ---
@@ -383,7 +402,18 @@ export class ContactCard {
         for (const r of roles) kinSel.append(new Option(r, r));
         if (curRole && !roles.includes(curRole)) kinSel.append(new Option(curRole, curRole));
         kinSel.value = curRole;
+        // Live both-direction preview so a reversed role is obvious before saving.
+        const preview = el("div", "kin-preview mono dim");
+        const renderPreview = () => {
+          preview.textContent = kinPreview({
+            selfName: contact.name, otherName: relFrom.name,
+            role: kinSel.value, otherGender: relFrom.gender,
+          });
+          preview.hidden = !kinSel.value;
+        };
+        renderPreview();
         kinSel.addEventListener("change", async () => {
+          renderPreview();
           const meta = { ...(edge.metadata || {}) };
           const kin = { ...(meta.kin || {}) };
           if (kinSel.value) {
@@ -403,11 +433,12 @@ export class ContactCard {
             reload();
           } catch (err) {
             kinSel.value = curRole;
+            renderPreview();
             toastError(err);
           }
         });
         kinRow.append(kinSel);
-        p.append(kinRow);
+        p.append(kinRow, preview);
       }
     }
 

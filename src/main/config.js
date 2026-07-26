@@ -46,6 +46,7 @@ module.exports = {
   backup: {
     dirName: "backups",
     intervalMs: 15 * 60 * 1000, // periodic snapshot
+    onlyWhenChanged: true,      // skip a periodic snapshot when nothing changed since the last one
     keep: 10,                   // rotation depth (routine snapshots)
     keepPreMigration: 5,        // reserved within `keep`, never added on top
     onExit: true,               // best-effort final snapshot (never blocks quit)
@@ -120,6 +121,8 @@ module.exports = {
     limit: 8,
     minChars: 2,
     timeoutMs: 4000,
+    backfillOnlineMax: 40,  // online geocodes per backfill pass (politeness cap)
+    backfillDelayMs: 200,   // pause between online geocode calls
   },
 
   // Online map tiles ride the same "location.online" preference. Fetched
