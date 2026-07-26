@@ -143,6 +143,9 @@ jobs:
         # build + smoke-test (validation), they just don't consume artifact
         # storage. Keeps the Actions storage quota from filling up.
         if: github.event_name == 'push'
+        # Best-effort: the smoke test above is the real pass/fail gate. A storage
+        # quota hiccup on this convenience upload must not fail the whole build.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: orbit-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
