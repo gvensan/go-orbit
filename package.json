@@ -25,7 +25,12 @@
     "test": "node scripts/electron-node.js --test",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json",
     "prebuild": "npm run rebuild:electron && npm run build:renderer",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "smoke:packaged": "node scripts/smoke-packaged.js",
+    "build:check": "npm run build -- --dir --publish never && npm run smoke:packaged",
+    "release:dry": "npm run build -- --publish never && npm run smoke:packaged",
+    "release:mac": "node scripts/require-platform.js darwin && npm run build -- --mac --arm64 --x64 --publish never && npm run smoke:packaged",
+    "release:win": "node scripts/require-platform.js win32 && npm run build -- --win --arm64 --x64 --publish never && npm run smoke:packaged"
   },
   "dependencies": {
     "better-sqlite3-multiple-ciphers": "12.11.1",

@@ -63,8 +63,9 @@ review for weak ones. Recent merges list with one-click undo.
 a real delete, confirmed). Auto-purge after N days, surfaced clearly.
 
 **Settings.** Encryption status + change passphrase; backup status (last
-snapshot, restore-from-backup); export archive (with the passphrase option);
-update channel + "check now" + current version; about/diagnostics.
+snapshot, restore-from-backup); export archive (with the passphrase option) and
+a contacts CSV export; update channel + "check now" + current version;
+about/diagnostics.
 
 **First-run onboarding.** Explain local-first + encryption in one screen,
 generate and store the DB key in the OS keychain, then offer an optional first

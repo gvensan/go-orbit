@@ -124,7 +124,7 @@ jobs:
             dist/*.deb
             dist/*.rpm
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1  # intermediate only: consumed by the publish job in the same run
           compression-level: 0
 
   # Gather every platform's installers and publish one pre-release to the public

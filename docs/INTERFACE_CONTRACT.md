@@ -36,9 +36,9 @@ which thread:
 | `searches:*` | list, save, delete | main, sync | saved searches (`kind` text or find) |
 | `location:*`, `map:tile` | search, online, setOnline, backfill | main (fetch) | Online geocoding + OSM tiles are enabled by default and user-disableable via `location.online`; the renderer never touches the network (`connect-src 'none'`), tiles return as `data:` URLs |
 | `backup:*` | now, status, list, restoreLatest, restore | main, sync | `VACUUM INTO` + verify + rotate; restore relaunches |
-| `update:*` | status, check | main | Packaged builds only; install-on-quit is enabled only after a verified backup |
-| `export:*` | archive, graphml, image | main | dialog-granted paths only; archive adds optional passphrase encryption |
-| `import:*` | preview, archive, file | main | dialog-granted paths only; snapshot backup **before** any bulk write; validate version → dedup → merge |
+| `update:*` | status, check, install | main | Packaged builds only; `install` applies a downloaded update on quit, enabled only after a verified backup |
+| `export:*` | archive, graphml, image, csv | main | dialog-granted paths only; archive adds optional passphrase encryption; `csv` writes a contacts sheet, with relationship detail rows when `includeDetails` is set |
+| `import:*` | preview, parse, file, archive, records | main | dialog-granted paths only; snapshot backup **before** any bulk write; validate version → dedup → merge. `parse` turns a vCard/CSV into rows (optional column mapping) for the wizard; `records` imports already-mapped rows under a `skip`/`merge`/`keepBoth` policy |
 | `dedup:*` | candidates, merge, undo | main | journaled merges (`merge_log`), undoable |
 | `dialog:*` | openFile, saveFile | main | the only way a path becomes granted for import/export |
 | `data:*` | clearAll, seedSample, sampleStatus | main | clearAll takes a safety backup first; seedSample powers samples/first-run |

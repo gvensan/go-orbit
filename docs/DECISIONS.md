@@ -14,6 +14,30 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-07-26 - Family tree view, Anchor, and load-bearing expanders
+
+- **A generational family-tree canvas mode (`tree`) joins the view set**
+  (`ego`/`mesh`/`orbit`/`reach`/`cluster`). It reads kinship edges into
+  generational lanes rooted on the owner, with couple bonds, sibling bars, and
+  parent-to-children buses drawn on an overlay behind the node circles. Node
+  size is held constant (matching the graph view) and zoom-in is capped so a
+  couple keeps a fixed on-screen gap. Renderer-local, no new IPC channel.
+  Specified in `GRAPH_CANVAS_REQUIREMENTS.md` sec 7.
+- **Anchor re-roots the tree on any pair.** A top-left combobox lists pairs as
+  `[Level n] X - Y` relative to you and presents the selected pair's extended
+  family (siblings, children, grandchildren, parents, grandparents); "Default"
+  resets to you.
+- **Expanders are shown only when load-bearing.** A directional expand/collapse
+  button appears only when toggling it would actually add or remove a node, so
+  a fully-expanded tree is not littered with dead buttons. A couple's children
+  expansion lives on both partners and toggles as a unit.
+- **Hover highlight has Default (vertical lineage) and Extended (collateral kin)
+  modes**, persisted per user.
+- Lane and column spacing were tightened after the first pass read as too airy.
+  The tree-specific layout tunables stay renderer-local (`graph-view.js`),
+  consistent with the precedent that per-view layout constants live next to the
+  view rather than in `config.js`.
+
 ## 2026-07-22 - Graph position pinning removed
 
 - The session-only Pin Position action added little beyond persisted node drag

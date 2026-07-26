@@ -99,6 +99,26 @@ Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist comput
 | Edge bundling | Reduce clutter in dense regions |
 | Timeline scrubbing | Show how the network grew over time |
 
+### Family tree view (canvas mode `tree`)
+
+An implemented addition to the original view set (`ego` / `mesh` / `orbit` /
+`reach` / `cluster`). A kinship-only view that lays the family graph out as a
+generational tree rooted on "you" (the owner contact), for reading lineage rather
+than exploring the whole network. It consumes the same `graph:snapshot`
+hydration and kinship edges as the other modes and adds no new IPC channel;
+layout, connectors, and expander placement are renderer-local (`graph-view.js`).
+
+| Aspect | Behavior |
+|---|---|
+| Root | Opens rooted on the owner at generation 0; ancestors above, descendants below. |
+| Generational lanes | Nodes placed by generation (`familyGenerations`): each lane labeled relative to the root (grandparents / parents / you / children ...). |
+| Couples & siblings | Spouses/co-parents sit adjacent as a unit with a couple bond + heart; blood siblings share a bar; parent-to-children buses are drawn on an overlay canvas *behind* the node circles. |
+| Constant node size | Nodes render at a fixed on-screen size (`zoomToSizeRatioFunction = 1`) matching the graph view; zoom-in is capped so a couple keeps a fixed on-screen gap. |
+| Expand / collapse | Per-node directional expanders reveal or hide parents (up), children (down), and siblings. A button shows only where it is **load-bearing**: it appears just when toggling it would actually add or remove a node. A couple's children expansion is shared and toggles both partners together. |
+| Anchor (re-root) | A combobox re-roots the tree on any chosen pair, labeled `[Level n] X - Y` relative to you (0), ancestors negative and descendants positive. Anchoring presents the extended family of that pair (siblings, children, grandchildren, parents, grandparents). A "Default" option resets to you. |
+| Hover highlight | Hovering lights the relevant family. **Default** mode is vertical lineage (self + partner, own siblings, ancestors to grandparents, children, grandchildren); **Extended** mode adds collateral kin (siblings' children, all ancestors, aunts/uncles). Connectors light only along the sub-segments that join lit nodes. |
+| Controls | Shared zoom in/fit/out plus tree-only expand-all / collapse-all and the Extended toggle in the top-center cluster; the anchor combobox sits in the top-left slot. |
+
 ## 8. Interaction spec
 
 - **Zoom** on wheel toward the cursor; **pan** on background drag; **fit-to-view** and **reset** as explicit controls.

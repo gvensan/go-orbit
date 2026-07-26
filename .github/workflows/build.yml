@@ -139,20 +139,25 @@ jobs:
         run: node scripts/smoke-packaged.js
 
       - name: Upload installers
+        # Only keep downloadable installers for main-branch check-ins. PRs still
+        # build + smoke-test (validation), they just don't consume artifact
+        # storage. Keeps the Actions storage quota from filling up.
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: orbit-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          # Validation artifacts: only the runnable installers people download to
+          # test. The update-feed files (.zip, .blockmap, latest*.yml) are proved
+          # by the release job's verify-update-metadata and just bloat storage
+          # here, so they are intentionally left out.
           path: |
             dist/*.dmg
-            dist/*.zip
             dist/*.exe
             dist/*.AppImage
             dist/*.deb
             dist/*.rpm
-            dist/*.blockmap
-            dist/latest*.yml
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 5
           compression-level: 0
 
   # Version tags publish signed/notarized installers to GitHub Releases.

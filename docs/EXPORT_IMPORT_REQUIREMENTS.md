@@ -88,6 +88,12 @@ No partial/selective export in v1 (whole graph only), no cross-format import
 beyond vCard/CSV (which are separate ingest paths, not the archive), no cloud
 destinations.
 
+A **contacts CSV export** (`export:csv`) exists as a separate outbound path,
+mirroring the CSV ingest path: it writes a contacts sheet and, when
+`includeDetails` is set, relationship detail rows. It is a convenience export,
+not the portable `.orbit` archive, and carries no passphrase encryption, so it
+is a plaintext file the user chooses to write outside the encrypted store.
+
 ## 8. Acceptance criteria
 
 1. **Round-trip:** export → import into an empty install reproduces contacts, edges, interactions, and tags exactly (counts and content).
