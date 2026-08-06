@@ -71,6 +71,21 @@ module.exports = {
   dedup: {
     nameSimMin: 0.92,           // Jaro-Winkler floor for name+org candidate pairs
     maxCandidates: 200,         // pairs surfaced to the review queue
+    // Import match preview (advisory only - the user decides every record).
+    matchNameSimMin: 0.86,      // lower fuzzy floor: surface POSSIBLE import matches
+    matchMaxCandidates: 5,      // ranked candidates shown per incoming record
+    matchConnections: 6,        // a candidate's related contacts shown for context
+  },
+
+  // In-app hover tooltips (tooltip.js). The renderer suppresses the native OS
+  // tooltip and draws its own so help appears promptly and in the app's voice.
+  tooltip: {
+    showDelayMs: 120,   // long enough that sweeping the pointer doesn't flash tips
+    repeatDelayMs: 40,  // moving between neighbouring controls feels instant
+    hideDelayMs: 60,    // survives the gap between a control and its wrapper
+    edgePadPx: 8,       // keep the bubble this far inside the window
+    gapPx: 8,           // distance from the anchor
+    maxWidthPx: 320,
   },
 
   graph: {

@@ -9,6 +9,7 @@ import { feature } from "topojson-client";
 import Supercluster from "supercluster";
 import worldTopo from "world-atlas/countries-50m.json";
 import { unwrapRing } from "./map-geometry.mjs";
+import { GENDER_COLORS } from "./colors.js";
 
 // Country outlines (offline, bundled): TopoJSON -> GeoJSON once at load.
 const WORLD = feature(worldTopo, worldTopo.objects.countries);
@@ -16,7 +17,7 @@ const WORLD = feature(worldTopo, worldTopo.objects.countries);
 const TILE = 256;          // OSM tile size (px)
 const MAX_ZOOM = 19;       // must match config.map.maxZoom
 const MERC_LAT = 85.0511;  // Web Mercator latitude limit
-const GENDER = { Female: "#ff2d95", Male: "#00c2ff" };
+const GENDER = GENDER_COLORS; // live alias: dots follow the active palette
 const CLUSTER_RADIUS = 50;  // screen pixels, conventional map-cluster radius
 const CLUSTER_MAX_ZOOM = 17;
 
@@ -70,17 +71,19 @@ export class GeoMap {
     const btn = (glyph, title, fn) => {
       const b = document.createElement("button");
       b.type = "button"; b.textContent = glyph; b.title = title;
+      b.setAttribute("aria-label", title);
       b.addEventListener("click", fn);
       ctrls.append(b);
       return b;
     };
     btn("+", "Zoom in", () => this.zoomBy(0.8));
     btn("−", "Zoom out", () => this.zoomBy(-0.8));
-    btn("⤢", "Fit all", () => this.fit());
+    btn("⤢", "Fit all mapped contacts in view", () => this.fit());
     container.append(ctrls);
 
     this.count = document.createElement("div");
     this.count.className = "geomap-count mono";
+    this.count.title = "How many of your contacts have a mapped location. Set a location on a contact to add them here";
     container.append(this.count);
 
     this.wireEvents();
@@ -435,6 +438,7 @@ export class GeoMap {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = `${p.isOwner ? "★ " : ""}${p.name}${p.deceased ? " †" : ""}`;
+        b.title = `Open ${p.name}${p.isOwner ? " (this is you)" : ""}${p.deceased ? " · marked deceased" : ""}`;
         b.addEventListener("click", () => { this.hidePopup(); this.handlers.onOpenContact(p.id); });
         list.append(b);
       }
@@ -447,6 +451,7 @@ export class GeoMap {
     if (marker.points.length > 12) {
       const search = document.createElement("input");
       search.type = "search"; search.placeholder = "Filter contacts…";
+      search.title = "Narrow this list of people at the same place";
       search.addEventListener("input", () => renderList(search.value));
       this.popup.append(search);
     }

@@ -3,6 +3,17 @@
 const { AppError } = require("../ipc/errors");
 const { requireLive } = require("./contacts");
 
+/** Canonical endpoint order for an edge. An UNDIRECTED tie is symmetric, so it is
+ *  stored with source_id <= target_id: this makes A-B and B-A the same primary
+ *  key, so the reverse of an existing undirected edge can never land as a second
+ *  row. Directed ties (e.g. "introduced") keep their direction. Kin metadata is
+ *  keyed by contact id, so reordering the endpoints never affects it.
+ *  @returns {[number, number]} */
+function canonicalEndpoints(sourceId, targetId, directed) {
+  if (!directed && sourceId > targetId) return [targetId, sourceId];
+  return [sourceId, targetId];
+}
+
 /** @returns {import('../../shared/types').Edge} */
 function rowToEdge(row) {
   return {
@@ -22,19 +33,22 @@ function create(db, { sourceId, targetId, type, directed, metadata }) {
     if (sourceId === targetId) {
       throw new AppError("VALIDATION", "An edge cannot connect a contact to itself.");
     }
+    // Store undirected ties canonically so the reverse (target->source) collides
+    // with the primary key instead of being written as a duplicate row.
+    const [src, tgt] = canonicalEndpoints(sourceId, targetId, directed);
     const now = Date.now();
     try {
       db.prepare(
         `INSERT INTO edges (source_id, target_id, type, directed, metadata, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(sourceId, targetId, type, directed ? 1 : 0, metadata ? JSON.stringify(metadata) : null, now);
+      ).run(src, tgt, type, directed ? 1 : 0, metadata ? JSON.stringify(metadata) : null, now);
     } catch (err) {
       if (String(err.code || "").startsWith("SQLITE_CONSTRAINT")) {
-        throw new AppError("CONFLICT", `Edge ${sourceId}->${targetId} (${type}) already exists.`);
+        throw new AppError("CONFLICT", `A ${type} connection between these contacts already exists.`);
       }
       throw err;
     }
-    return { sourceId, targetId, type, directed: !!directed, metadata, createdAt: now };
+    return { sourceId: src, targetId: tgt, type, directed: !!directed, metadata, createdAt: now };
   });
   return tx();
 }
@@ -101,4 +115,4 @@ function listFor(db, contactId) {
     .map(rowToEdge);
 }
 
-module.exports = { create, remove, changeType, listFor, rowToEdge };
+module.exports = { create, remove, changeType, listFor, rowToEdge, canonicalEndpoints };

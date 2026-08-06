@@ -33,6 +33,7 @@ export function openModal({ title, onClose, maximizable = false }) {
   }
   const x = el("button", null, "✕");
   x.type = "button";
+  x.title = "Close (Esc)";
   x.setAttribute("aria-label", "Close");
   actions.append(x);
   head.append(h2, actions);
@@ -77,8 +78,10 @@ export function confirmModal({ title, message, confirmLabel = "Confirm", danger 
     m.body.append(el("p", null, message));
     const cancel = el("button", null, "Cancel");
     cancel.type = "button";
+    cancel.title = "Close without doing anything (Esc)";
     const ok = el("button", danger ? "danger" : "primary", confirmLabel);
     ok.type = "button";
+    ok.title = danger ? `${confirmLabel}. This cannot be undone` : confirmLabel;
     m.foot.append(cancel, ok);
     cancel.addEventListener("click", () => m.close());
     ok.addEventListener("click", () => {
@@ -105,15 +108,23 @@ export function confirmDangerModal({ title, message, confirmWord, confirmLabel =
     const input = el("input");
     input.type = "text";
     input.placeholder = confirmWord;
+    input.title = `Type ${confirmWord} exactly to unlock the button. This action cannot be undone`;
     row.append(input);
     m.body.append(row);
     const cancel = el("button", null, "Cancel");
     cancel.type = "button";
+    cancel.title = "Close without doing anything (Esc)";
     const ok = el("button", "danger", confirmLabel);
     ok.type = "button";
     ok.disabled = true;
+    ok.title = `Type ${confirmWord} above to enable this. It cannot be undone`;
     m.foot.append(cancel, ok);
-    input.addEventListener("input", () => { ok.disabled = input.value.trim() !== confirmWord; });
+    input.addEventListener("input", () => {
+      ok.disabled = input.value.trim() !== confirmWord;
+      ok.title = ok.disabled
+        ? `Type ${confirmWord} above to enable this. It cannot be undone`
+        : `${confirmLabel}. This cannot be undone`;
+    });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !ok.disabled) confirm(); });
     const confirm = () => { settle(true); m.close(); };
     ok.addEventListener("click", confirm);
@@ -123,7 +134,7 @@ export function confirmDangerModal({ title, message, confirmWord, confirmLabel =
 }
 
 /** Simple inline prompt modal; resolves the string or null on cancel. */
-export function promptModal({ title, label, type = "text", placeholder = "", confirmLabel = "OK" }) {
+export function promptModal({ title, label, type = "text", placeholder = "", value = "", confirmLabel = "OK" }) {
   return new Promise((resolve) => {
     let settled = false;
     const settle = (v) => {
@@ -138,12 +149,16 @@ export function promptModal({ title, label, type = "text", placeholder = "", con
     const input = el("input");
     input.type = type;
     input.placeholder = placeholder;
+    input.title = `${label}. Press Enter to confirm, Esc to cancel`;
+    input.value = value; // e.g. rename flows seed the current name
     row.append(lab, input);
     m.body.append(row);
     const ok = el("button", "primary", confirmLabel);
     ok.type = "button";
+    ok.title = `${confirmLabel} (Enter)`;
     const cancel = el("button", null, "Cancel");
     cancel.type = "button";
+    cancel.title = "Close without doing anything (Esc)";
     m.foot.append(cancel, ok);
     const submit = () => {
       settle(input.value);

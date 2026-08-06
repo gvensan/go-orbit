@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const { AppError } = require("../ipc/errors");
 const { importContacts } = require("./importer");
+const { canonicalEndpoints } = require("../db/edges");
 
 const MAGIC = "ORBIT1";
 const SCHEMA_VERSION = 1;
@@ -209,7 +210,10 @@ function importArchive(db, { srcPath, passphrase, onDuplicate }) {
       // metadata.kin = { <contactId>: role }); otherwise the kin roles point at
       // the archive's old ids and become unreadable after import.
       const metadata = remapEdgeMetadata(e.metadata, idMap);
-      insE.run(s, d, e.type, e.directed ? 1 : 0, metadata ? JSON.stringify(metadata) : null, now);
+      // Canonicalise undirected ties (source <= target) so importing into a DB
+      // that already has the reverse edge merges instead of duplicating.
+      const [cs, ct] = canonicalEndpoints(s, d, e.directed);
+      insE.run(cs, ct, e.type, e.directed ? 1 : 0, metadata ? JSON.stringify(metadata) : null, now);
     }
     const insI = db.prepare(
       "INSERT INTO interactions (contact_id, occurred_at, kind, note) VALUES (?, ?, ?, ?)"

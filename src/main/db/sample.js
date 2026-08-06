@@ -7,6 +7,7 @@
 // tags, so layout/community/centrality see realistic structure.
 
 const config = require("../config");
+const { RELATIONSHIP_TYPES, BUSINESS_TYPES } = require("../../shared/relationships");
 
 const CIRCLE_SIZE = 40;       // members per social circle
 const EDGES_PER_CONTACT = 10; // insert attempts; ~10x contacts in edge rows
@@ -16,7 +17,9 @@ const FIRST = ["Ava","Liam","Noah","Emma","Olivia","Mason","Mia","Ethan","Riya",
 const LAST = ["Chen","Patel","Kim","Garcia","Okafor","Nguyen","Silva","Haddad","Rossi","Novak","Khan","Torres","Ivanov","Tanaka","Mensah","Cohen","Reyes","Singh","Muller","Abbas"];
 const ORGS = ["Acme Corp","Globex","Initech","Umbrella","Wayne Ent.","Hooli","Stark Ind.","Soylent"];
 const ROLES = ["Eng Lead","Designer","PM","Founder","Analyst","Recruiter","Sales","Ops","Legal","Data Sci"];
-const EDGE_TYPES = ["colleague","friend","acquaintance","family","introduced"];
+// Sample networks are people, so business-only types (vendor) are excluded;
+// derived from the shared list so a new personal type appears here for free.
+const EDGE_TYPES = RELATIONSHIP_TYPES.filter((t) => !BUSINESS_TYPES.has(t));
 const TAGS = ["mentor","investor","alumni","neighbor","climbing","bookclub","conference","exteam","vendor","press","advisor","running"];
 const NOTES = ["met at a conference","intro from a mutual friend","worked together on a launch","regular coffee catch-up",""];
 

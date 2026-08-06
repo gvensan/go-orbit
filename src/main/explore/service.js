@@ -11,6 +11,7 @@
 const config = require("../config");
 const meta = require("../db/meta");
 const { parseQuery } = require("../search/engine");
+const { RELATIONSHIP_TYPES, BUSINESS_TYPES, isBusinessContact } = require("../../shared/relationships");
 
 const STATUS_KEYS = ["starred", "overdue", "dormant", "hasEmail", "hasPhone"];
 const EXPLORE_SORT_KEYS = [
@@ -143,11 +144,29 @@ class ExploreService {
     if (ownerId != null) walk(ownerId);
     for (const id of [...familyAdj.keys()].sort((a, b) => a - b)) if (!familyDepth.has(id)) walk(id);
 
+    // A vendor is an organization in its own right (mirrors the Cluster view
+    // and the graph snapshot): a business contact with no company field lists
+    // under Organizations by its own name, and that org filter matches it.
+    const businessTie = new Set();
+    const personalTie = new Set();
+    for (const r of db.prepare("SELECT source_id AS s, target_id AS t, type FROM edges").all()) {
+      const bucket = BUSINESS_TYPES.has(r.type) ? businessTie : personalTie;
+      bucket.add(r.s);
+      bucket.add(r.t);
+    }
+
     this.rows = db
       .prepare("SELECT id, name, fields, starred, cadence_days, created_at, updated_at FROM contacts WHERE deleted_at IS NULL")
       .all()
       .map((c) => {
         const f = c.fields ? JSON.parse(c.fields) : {};
+        const business = isBusinessContact({
+          flagged: /^(yes|true|1)$/i.test(String(f.business ?? "")),
+          isOwner: c.id === ownerId,
+          gender: f.gender,
+          hasBusinessTie: businessTie.has(c.id),
+          hasPersonalTie: personalTie.has(c.id),
+        });
         let locationResolved = {};
         try { locationResolved = JSON.parse(f.locationResolved || "") || {}; } catch { /* legacy/malformed metadata */ }
         const locationParts = locationResolved.components || {};
@@ -161,7 +180,7 @@ class ExploreService {
         return {
           id: c.id,
           name: c.name,
-          org: f.company ?? "",
+          org: f.company || (business ? c.name : ""),
           role: f.role ?? "",
           email: f.email ?? "",
           phone: f.phone ?? "",
@@ -282,7 +301,7 @@ class ExploreService {
       tags: this.countTop(rows, (r) => passesAllExcept(r, "tags"), (r) => r.tags),
       edgeTypes: this.countValues(
         rows, (r) => passesAllExcept(r, "edgeTypes"),
-        (r) => [...r.edgeTypes], ["colleague", "friend", "acquaintance", "family", "introduced"]
+        (r) => [...r.edgeTypes], RELATIONSHIP_TYPES
       ),
       degrees: this.countDegrees(rows, (r) => passesAllExcept(r, "degreeBuckets")),
     };

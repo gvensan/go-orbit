@@ -204,6 +204,12 @@ button.ghost { background: transparent; }
 #graph-root { flex: 1; min-width: 0; margin: 50px 0 54px; }
 .minimap-canvas { touch-action: none; }
 .graph-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+/* Sigma's hover layer draws the on-hover name box. By DOM order it sits under
+   the overlay canvas (rings, hearts, guides, tree connectors at z-index 8), so
+   names vanished behind decorations - raise it above the overlay, and keep it
+   inert so the mouse layer underneath still receives every event. It stays
+   below the hover card (9, later sibling), minimap, and tree expanders (10). */
+#graph-root canvas.sigma-hovers { z-index: 9; pointer-events: none; }
 
 /* Tree view: directional +/- expanders around the active person. */
 .tree-expanders { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
@@ -229,19 +235,18 @@ button.ghost { background: transparent; }
 }
 .minimap-wrap[hidden] { display: none; }
 .minimap-canvas { display: block; cursor: crosshair; border-radius: 4px; }
+/* Chip scrim from the THEME's panel color (was a hardcoded black rgba that
+   read as heavy gray boxes on the light theme): translucent enough to keep
+   the buttons legible over a busy map, invisible-ish over empty corners. */
 .minimap-hide {
   position: absolute; top: 3px; right: 3px; z-index: 1;
-  width: 17px; height: 17px; padding: 0; line-height: 1; font-size: 10px;
-  border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
+  width: 18px; height: 18px; padding: 0; line-height: 1; font-size: 10px;
+  border: 1px solid color-mix(in srgb, var(--hairline) 70%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  color: var(--dim); cursor: pointer;
 }
-.minimap-hide:hover { color: var(--text); }
-.minimap-shuffle {
-  position: absolute; top: 3px; left: 3px; z-index: 1;
-  width: 17px; height: 17px; padding: 0; line-height: 1; font-size: 12px;
-  border: 0; border-radius: 4px; background: rgba(0,0,0,0.35); color: var(--dim); cursor: pointer;
-}
-.minimap-shuffle:hover { color: var(--accent); }
-.minimap-shuffle[hidden] { display: none; }
+.minimap-hide:hover { color: var(--text); background: var(--hover); }
 .minimap-show {
   position: absolute; top: 10px; right: 10px; z-index: 9;
   padding: 5px 9px; font-size: 15px; line-height: 1; cursor: pointer;
@@ -372,7 +377,7 @@ button.ghost { background: transparent; }
   .nav-item:hover .nav-icon { transform: none; }
 }
 
-#legend, #legend-gender {
+#legend, #legend-gender, #legend-cluster {
   position: absolute;
   bottom: 14px;
   display: flex;
@@ -385,6 +390,7 @@ button.ghost { background: transparent; }
 }
 #legend { left: 16px; }
 #legend-gender { right: 16px; }
+#legend-cluster { left: 50%; transform: translateX(-50%); }
 .legend-swatch {
   display: inline-block;
   width: 8px; height: 8px;
@@ -392,6 +398,9 @@ button.ghost { background: transparent; }
   margin-right: 5px;
   vertical-align: baseline;
 }
+/* Cluster person/organization legend icons. */
+.legend-ico { display: inline-flex; color: var(--dim); }
+.legend-ico svg { display: block; }
 .legend-ring {
   display: inline-block;
   width: 8px; height: 8px;
@@ -430,6 +439,9 @@ button.ghost { background: transparent; }
 /* Thin divider between the layout tabs and the independent fade toggle. */
 .canvas-view-toggle .cv-sep { align-self: stretch; width: 1px; margin: 2px 3px; background: var(--hairline); }
 .canvas-view-toggle .cv-toggle.active { background: var(--active); color: var(--text); }
+/* Icon-only toggles (fade links, balloon layout): square hit target, no label. */
+.canvas-view-toggle .cv-icon { padding: 4px 7px; }
+.canvas-view-toggle .cv-icon .view-icon { width: 17px; height: 17px; }
 /* Orbit ring-metric switch, sits under the canvas toggle (top-left). */
 .orbit-controls {
   position: absolute;
@@ -538,6 +550,19 @@ button.ghost { background: transparent; }
   cursor: pointer;
 }
 #graph-nav button:hover { border-color: var(--faint); }
+/* Name of the drilled-into cluster, shown for reference next to Back. */
+.graph-nav-focus {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--faint);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-nav-focus[hidden] { display: none; }
 /* Home icon: compact, glyph a touch larger than the back label. */
 #graph-home { padding: 5px 9px; font-size: 15px; line-height: 1; }
 
@@ -877,6 +902,75 @@ button.ghost { background: transparent; }
 .xp-clear-selection:hover { color: var(--text); border-color: var(--faint); }
 .xp-bulk .hidden { display: none; }
 .xp-bulk-spacer { flex: 1 1 auto; min-width: 0; }
+/* Filter box clear (✕): inside the input's right edge, only while text exists. */
+.xp-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.xp-input-wrap > input { width: 100%; padding-right: 34px; }
+.xp-input-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; padding: 0; line-height: 1;
+  border: 0; border-radius: 50%; background: none; color: var(--faint);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.xp-input-clear:hover, .xp-input-clear:focus-visible { color: var(--text); background: var(--hover); }
+/* Per-row edit pencil (opens the edit popup; no mode needed). */
+.xp-row-edit {
+  margin-left: 6px; padding: 0 5px; border: 0; border-radius: 4px;
+  background: none; color: var(--faint); cursor: pointer; font-size: 12px;
+  opacity: 0; transition: opacity 100ms ease;
+}
+.xp-row:hover .xp-row-edit, .xp-row-edit:focus-visible { opacity: 1; }
+.xp-row-edit:hover, .xp-row-edit:focus-visible { color: var(--accent); background: var(--hover); }
+/* Edit popup form: label + control pairs; controls fill their column. */
+.xp-editform {
+  display: grid; grid-template-columns: 120px 1fr; gap: 10px 12px; align-items: center;
+  max-height: 56vh; overflow-y: auto; padding-right: 4px;
+}
+.xp-editform-key { font-size: 12px; color: var(--dim); }
+.xp-editform .field-value, .xp-editform input, .xp-editform select, .xp-editform textarea { width: 100%; min-width: 0; }
+.xp-editform .phone-input { flex-wrap: nowrap; }
+.xp-editform .country-picker { flex: 0 0 110px; }
+/* Bulk "Set common field": label + control pairs sized to the dialog, never
+   overflowing it; the location extras (hint + pin) wrap beneath the input. */
+.bulk-field-form { display: grid; grid-template-columns: 90px 1fr; gap: 12px; align-items: start; }
+.bulk-field-row { display: contents; }
+.bulk-field-row > label { padding-top: 6px; }
+.bulk-field-value { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.bulk-field-form select, .bulk-field-value input, .bulk-field-value select, .bulk-field-value textarea { width: 100%; min-width: 0; }
+.bulk-field-value .location-input-wrap { width: 100%; }
+.bulk-field-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+/* Explore edit mode: the toggle lights up, editable cells invite a click, and
+   the inline editor fills its cell without shifting the row height. */
+.xp-edit-btn.active {
+  background: var(--active); color: var(--text);
+  border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  font-weight: 600;
+}
+.xp-editing .xp-row [data-edit-key] { cursor: text; }
+.xp-editing .xp-row [data-edit-key]:hover { box-shadow: inset 0 0 0 1px var(--accent); border-radius: 4px; }
+.xp-cell-input {
+  width: 100%; min-width: 0; font: inherit; color: var(--text);
+  background: var(--panel); border: 1px solid var(--focus); border-radius: 4px; padding: 2px 6px;
+}
+.xp-cell-input.invalid, .xp-cell-editing .invalid { border-color: var(--danger); }
+/* Rich controls (phone widget, notes textarea) need more room than a 40px
+   cell: the editing cell overflows and the control floats on its own panel
+   above the row, so neither the cell's ellipsis clipping, the sticky columns,
+   nor neighbouring rows can cut it off. */
+.xp-editing .xp-row:has(.xp-cell-editing) { position: relative; z-index: 6; overflow: visible; }
+.xp-cell-editing { overflow: visible; position: relative; z-index: 6; }
+.xp-cell-editing .phone-input {
+  position: absolute; top: 2px; left: 0; z-index: 7;
+  display: flex; flex-wrap: nowrap; gap: 4px; align-items: center;
+  width: 340px; max-width: 60vw;
+  background: var(--panel); border: 1px solid var(--focus); border-radius: 6px;
+  padding: 4px 6px; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+.xp-cell-editing .country-picker { flex: 0 0 112px; }
+.xp-cell-editing .phone-area { width: 56px; flex: 0 0 auto; }
+.xp-cell-editing .phone-number { flex: 1 1 auto; min-width: 90px; }
+.xp-cell-editing textarea.xp-cell-input {
+  position: absolute; top: 2px; left: 0; right: 0; z-index: 7; min-height: 88px; resize: vertical;
+}
 .xp-col-menu {
   position: fixed; z-index: 60; width: min(720px, calc(100vw - 16px)); max-height: min(72vh, 620px); overflow-y: auto;
   background: var(--bg); border: 1px solid var(--hairline); border-radius: 9px;
@@ -1052,11 +1146,25 @@ button.ghost { background: transparent; }
 #settings { flex: 1; min-width: 0; display: flex; }
 .settings-page { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 26px 0; }
 .settings-page .page-title { font-size: 20px; font-weight: 600; margin: 0 0 14px; flex: 0 0 auto; }
-.settings-cols { flex: 1; min-height: 0; display: flex; gap: 0; }
-.settings-col { flex: 1; min-width: 0; overflow-y: auto; padding-bottom: 22px; }
-.settings-col:first-of-type { padding-right: 26px; }
-.settings-col:last-of-type { padding-left: 26px; }
-.settings-divider { flex: 0 0 1px; background: var(--hairline); align-self: stretch; }
+.settings-tabs {
+  flex: 0 0 auto; display: flex; gap: 2px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--hairline); margin-bottom: 4px;
+}
+.settings-tab {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  font: inherit; font-size: 13.5px; color: var(--dim);
+  padding: 8px 12px 9px; border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.settings-tab:hover { color: var(--text); background: var(--hover); }
+.settings-tab.selected {
+  color: var(--text); font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.settings-panels { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 22px; }
+.settings-panel { max-width: 640px; }
+.settings-panel[hidden] { display: none; }
 .about-summary { display: flex; gap: 12px; align-items: center; margin: 4px 0 12px; }
 .about-logo { width: 54px; height: 54px; flex: none; }
 .about-copy { margin: 0; max-width: 390px; color: var(--dim); line-height: 1.45; }
@@ -1152,6 +1260,8 @@ button.ghost { background: transparent; }
 }
 .hover-title { font-weight: 600; font-size: 13px; }
 .hover-meta { color: var(--dim); margin-top: 3px; line-height: 1.5; }
+/* The tie type leads the meta line, in its own relationship colour. */
+.hover-rel { font-weight: 600; }
 
 /* ---- upkeep accents ---- */
 .star-btn {
@@ -1400,6 +1510,11 @@ input[type="text"], input[type="password"], select, textarea {
 /* Country on its own row (full width for the searchable names), then the
    area code + local number side by side. */
 .phone-input { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* Searchable country picker: the wrap takes the old select's layout slot; the
+   menu reuses the location-suggestions dropdown chrome. */
+.country-picker { position: relative; flex: 1 1 100%; min-width: 0; }
+.country-picker > input.phone-country { width: 100%; }
+.country-menu { min-width: 240px; }
 .phone-country { flex: 1 1 100%; min-width: 0; }
 .phone-area { flex: 0 0 72px; min-width: 0; }
 .phone-number { flex: 1; min-width: 0; }
@@ -1455,6 +1570,8 @@ input[type="date"] { color-scheme: dark; }
 /* ---- CSV review table ---- */
 .modal--wide { width: min(1180px, 97vw); }
 .review-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
+.review-mode { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.rv-search { width: 180px; min-width: 140px; flex: none; }
 .review-head .rv-complete { color: var(--success, #54c58b); }
 .review-head .rv-incomplete { color: var(--amber, #e0a83a); }
 .review-filter { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); cursor: pointer; }
@@ -1477,12 +1594,10 @@ input[type="date"] { color-scheme: dark; }
 .rv-phone { display: flex; flex-direction: column; gap: 4px; min-width: 190px; }
 .rv-phone-country { font-size: 12px; padding: 3px 4px; max-width: 190px; }
 .rv-phone-num { min-width: 0; }
-.review-status { text-align: center; width: 40px; white-space: nowrap; }
+.review-status { width: 58px; white-space: nowrap; }
 .review-status .status-icon { display: inline-block; width: 14px; }
 .row-warn { color: var(--amber, #e0a83a); cursor: help; }
 .row-ok { color: var(--success, #54c58b); }
-.rv-del { border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 3px; font-size: 12px; margin-left: 4px; border-radius: 4px; }
-.rv-del:hover { color: var(--danger); }
 .warn-tip { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--hairline); border-radius: 7px; padding: 6px 10px; font-size: 12px; color: var(--text); box-shadow: 0 10px 28px rgb(0 0 0 / 0.4); max-width: 280px; pointer-events: none; }
 .warn-tip[hidden] { display: none; }
 .warn-tip div { line-height: 1.5; }
@@ -1496,6 +1611,86 @@ input[type="date"] { color-scheme: dark; }
 .kin-hint { margin-top: 2px; font-size: 10px; }
 .review-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; }
 
+/* ---- import: resolve step (duplicate decisions) ---- */
+.resolve-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.resolve-modes { display: inline-flex; border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden; }
+.resolve-mode { border: 0; background: none; color: var(--faint); padding: 4px 12px; font-size: 12px; cursor: pointer; }
+.resolve-mode.active { background: var(--active, color-mix(in srgb, var(--accent) 22%, transparent)); color: var(--text); }
+.resolve-sum { margin-left: auto; }
+.resolve-bulk { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.chip-btn { font-size: 11px; padding: 4px 10px; border: 1px solid var(--hairline); border-radius: 999px; background: none; color: var(--text); cursor: pointer; }
+.chip-btn:hover { border-color: var(--accent); }
+.resolve-filter { margin-left: auto; font-size: 12px; padding: 3px 6px; }
+
+.resolve-list { display: flex; flex-direction: column; gap: 8px; }
+.resolve-row { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; }
+.resolve-row.row-ignored { opacity: 0.6; }
+.resolve-ignored-tag { margin-left: auto; }
+.single-ignored { padding: 12px 14px; border: 1px dashed var(--hairline); border-radius: 8px; }
+
+/* per-row consider/ignore switch (Review + Resolve) */
+.consider-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex: none; }
+.consider-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ct-track { width: 30px; height: 17px; border-radius: 999px; background: var(--hairline); position: relative; transition: background 0.15s; flex: none; }
+.ct-knob { position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: var(--faint); transition: transform 0.15s, background 0.15s; }
+.consider-toggle input:checked + .ct-track { background: color-mix(in srgb, var(--success, #54c58b) 60%, transparent); }
+.consider-toggle input:checked + .ct-track .ct-knob { transform: translateX(13px); background: #fff; }
+.consider-toggle input:indeterminate + .ct-track { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.consider-toggle input:indeterminate + .ct-track .ct-knob { transform: translateX(7px); background: #fff; }
+.consider-toggle input:focus-visible + .ct-track { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* triage toolbar (above the header) + header-level consider-all switch */
+.triage-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.master-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.show-ignored-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Review triage tally + ignored-row dimming */
+.rv-stats { margin: 0 0 10px; font-size: 12px; }
+.rv-consider { color: var(--accent); }
+.rv-complete { color: var(--success, #54c58b); }
+.rv-attention { color: var(--amber, #e0a83a); }
+.rv-ignored { color: var(--faint); }
+.review-row.row-ignored td { opacity: 0.4; }
+.review-row.row-ignored .review-status { opacity: 1; }
+.review-status { display: flex; align-items: center; gap: 6px; }
+.resolve-row.decided-merge { border-color: color-mix(in srgb, var(--amber, #e0a83a) 45%, var(--hairline)); }
+.resolve-row-top { display: flex; align-items: center; gap: 10px; }
+.resolve-row-id { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.resolve-name { font-weight: 600; }
+.resolve-decision { margin-left: auto; font-size: 12px; padding: 3px 6px; max-width: 260px; }
+.resolve-cands { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.resolve-note { margin-top: 6px; }
+
+.resolve-chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+.chip-new { color: var(--success, #54c58b); border-color: color-mix(in srgb, var(--success, #54c58b) 45%, transparent); }
+.chip-weak { color: var(--amber, #e0a83a); border-color: color-mix(in srgb, var(--amber, #e0a83a) 45%, transparent); }
+.chip-strong { color: var(--danger, #e0685a); border-color: color-mix(in srgb, var(--danger, #e0685a) 45%, transparent); }
+.chip-infile { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.prior-badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--hover); color: var(--faint); }
+.prior-badge.prior-ignored { color: var(--amber, #e0a83a); }
+
+.cand-detail { font-size: 11px; line-height: 1.5; padding-left: 8px; border-left: 2px solid var(--hairline); }
+.cand-reasons { color: var(--text); }
+.cand-meta, .cand-conns { color: var(--faint); }
+
+/* one-at-a-time */
+.single-nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 10px; }
+.single-count { color: var(--faint); }
+.single-incoming { border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.single-nameline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.single-name { font-size: 15px; font-weight: 600; }
+.single-meta { margin-top: 4px; }
+.single-choices { display: flex; flex-direction: column; gap: 8px; }
+.cand-opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--hairline); border-radius: 8px; padding: 9px 11px; cursor: pointer; }
+.cand-opt.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cand-opt input { margin-top: 3px; }
+.cand-body { min-width: 0; flex: 1; }
+.cand-main { display: flex; align-items: baseline; gap: 8px; }
+.cand-name { font-weight: 600; }
+.cand-score { color: var(--faint); font-size: 12px; }
+.manual-link { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.manual-link .rel-wrap { position: relative; flex: 1; max-width: 320px; }
+
 /* ---- dedup / trash rows ---- */
 .pair-row { border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .pair-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
@@ -1506,6 +1701,22 @@ input[type="date"] { color-scheme: dark; }
 .trash-row { display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid var(--hairline); }
 .trash-row .when { margin-left: auto; color: var(--faint); }
 
+/* Contact card: a business stands in for the gender row (a vendor has none). */
+.biz-kind { display: flex; align-items: center; gap: 10px; }
+.biz-tag {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 10px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.biz-undo {
+  border: 0; background: none; padding: 0;
+  color: var(--faint); font: inherit; font-size: 12px;
+  text-decoration: underline; cursor: pointer;
+}
+.biz-undo:hover, .biz-undo:focus-visible { color: var(--dim); }
+
 .legend-item { cursor: pointer; user-select: none; }
 .legend-item.off { opacity: 0.35; text-decoration: line-through; }
 
@@ -1513,6 +1724,115 @@ input[type="date"] { color-scheme: dark; }
 @media (max-width: 900px) {
   #panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 8; }
 }
+
+/* --- Settings > Appearance: palette picker -------------------------------- */
+.palette-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.palette-option {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 8px;
+  background: var(--panel);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.palette-option.selected { border-color: var(--active-border); background: var(--active); }
+.palette-actions { display: flex; align-items: center; gap: 8px; flex: none; margin-top: 2px; }
+.palette-active-badge {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  border-radius: 999px; padding: 2px 9px;
+}
+.palette-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.palette-name { font-weight: 600; }
+.palette-blurb { font-size: 12.5px; }
+.palette-swatches { display: inline-flex; align-items: center; gap: 5px; }
+.palette-dot {
+  width: 13px; height: 13px; border-radius: 50%; display: inline-block;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+}
+.palette-ring {
+  width: 11px; height: 11px; border-radius: 50%; display: inline-block;
+  border: 2.5px solid; background: transparent; margin-left: 2px;
+}
+.palette-editor { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.palette-editor-grid {
+  display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 8px 10px; align-items: center;
+}
+.palette-editor-grid .palette-key { font-size: 12px; color: var(--dim); }
+.palette-editor input[type="color"] {
+  inline-size: 44px; block-size: 26px; padding: 1px;
+  border: 1px solid var(--hairline); border-radius: 6px; background: var(--panel); cursor: pointer;
+}
+@media (max-width: 900px) {
+  .palette-editor-grid { grid-template-columns: auto 1fr; }
+}
+
+/* --- Settings > Admin: data review cards ---------------------------------- */
+.health-show-ignored { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; font-size: 13px; color: var(--dim); }
+.health-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.health-chip {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  border: 1px solid var(--hairline); border-radius: 999px; padding: 2px 10px;
+}
+.health-chip.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.health-chip.warn { color: #d8792c; border-color: color-mix(in srgb, #d8792c 45%, transparent); }
+.health-chip.info { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.health-resolved { font-size: 12px; color: var(--ok); }
+.health-when { font-size: 11px; margin-left: auto; }
+.health-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.health-empty { padding: 8px 0; }
+.health-card {
+  border: 1px solid var(--hairline); border-left-width: 3px; border-radius: 8px;
+  background: var(--panel); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.health-card.sev-error { border-left-color: var(--danger); }
+.health-card.sev-warn { border-left-color: #d8792c; }
+.health-card.sev-info { border-left-color: var(--accent); }
+.health-card.st-deferred { opacity: 0.72; }
+.health-card.st-ignored { opacity: 0.55; }
+.health-card.st-fixed { border-left-color: var(--ok); opacity: 0.8; }
+.health-card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.health-sev {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.health-sev.error { color: var(--danger); }
+.health-sev.warn { color: #d8792c; }
+.health-sev.info { color: var(--accent); }
+.health-title { font-weight: 600; }
+.health-status {
+  font-size: 11px; color: var(--faint); margin-left: auto;
+  border: 1px dashed var(--hairline); border-radius: 999px; padding: 1px 8px;
+}
+.health-detail { margin: 0; font-size: 13.5px; max-width: 70ch; }
+.health-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---- hover tooltips (tooltip.js) ----
+   Replaces the OS `title` bubble so help appears promptly, in the app's type,
+   and on keyboard focus as well as hover. Never hit-tested: the pointer must be
+   able to travel across it without disturbing whatever opened it. */
+.app-tip {
+  position: fixed;
+  z-index: 200; /* above modals (100) and menus; the tip is always topmost */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--panel) 96%, var(--text));
+  color: var(--text);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere; /* long paths in Settings must not overflow the bubble */
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.42);
+  animation: tip-in 90ms ease-out;
+}
+.app-tip[hidden] { display: none; }
+.app-tip.above { animation-name: tip-in-above; }
+
+@keyframes tip-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes tip-in-above { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+:root[data-theme="light"] .app-tip { box-shadow: 0 10px 28px rgb(15 23 42 / 0.18); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

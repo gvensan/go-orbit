@@ -41,6 +41,7 @@ export async function openTrash({ onChanged }) {
     const bar = el("div", "trash-actions");
     const purgeAll = el("button", "danger", `Delete all forever (${trashed.length})`);
     purgeAll.type = "button";
+    purgeAll.title = `Permanently remove all ${trashed.length} trashed contacts, their relationships, and their timelines. This cannot be undone`;
     purgeAll.addEventListener("click", async () => {
       const yes = await confirmDangerModal({
         title: "Empty the trash?",
@@ -73,6 +74,7 @@ export async function openTrash({ onChanged }) {
       row.append(el("span", "when mono", `deleted ${fmtDate(c.deletedAt)}`));
       const restore = el("button", null, "Restore");
       restore.type = "button";
+      restore.title = `Bring ${c.name} back, with their relationships and timeline intact`;
       restore.addEventListener("click", async () => {
         try {
           await api().contacts.restore({ id: c.id });
@@ -86,6 +88,7 @@ export async function openTrash({ onChanged }) {
       // Purge is the app's ONLY hard delete, so it is the one confirmed action.
       const purge = el("button", "danger", "Delete forever");
       purge.type = "button";
+      purge.title = `Permanently remove ${c.name}, their relationships, and their timeline. This cannot be undone`;
       purge.addEventListener("click", async () => {
         const yes = await confirmModal({
           title: `Delete ${c.name} forever?`,
@@ -130,7 +133,9 @@ export async function openDedupQueue({ onChanged }) {
     m.body.append(el("p", "dim", `${pairs.length} candidate pair${pairs.length > 1 ? "s" : ""}, strongest first.`));
     for (const pair of pairs) {
       const row = el("div", "pair-row");
-      row.append(el("div", "pair-reason", `${pair.reason} · confidence ${(pair.score * 100).toFixed(0)}%`));
+      const reason = el("div", "pair-reason", `${pair.reason} · confidence ${(pair.score * 100).toFixed(0)}%`);
+      reason.title = "Why Orbit thinks these two are the same person, and how sure it is. Nothing merges until you choose";
+      row.append(reason);
       const sides = el("div", "pair-sides");
       for (const side of [pair.a, pair.b]) {
         const box = el("div", "pair-side");
@@ -165,12 +170,15 @@ export async function openDedupQueue({ onChanged }) {
       };
       const keepA = el("button", "primary", `Keep "${pair.a.name}"`);
       keepA.type = "button";
+      keepA.title = `Merge ${pair.b.name} into ${pair.a.name}, keeping their name and filling any blanks. You can undo this`;
       keepA.addEventListener("click", () => doMerge(pair.aId, pair.bId, pair.a.name));
       const keepB = el("button", null, `Keep "${pair.b.name}"`);
       keepB.type = "button";
+      keepB.title = `Merge ${pair.a.name} into ${pair.b.name}, keeping their name and filling any blanks. You can undo this`;
       keepB.addEventListener("click", () => doMerge(pair.bId, pair.aId, pair.b.name));
       const skip = el("button", null, "Not duplicates");
       skip.type = "button";
+      skip.title = "Dismiss this pair for now. Both contacts stay as they are";
       skip.addEventListener("click", () => row.remove());
       actions.append(keepA, keepB, skip);
       row.append(actions);
@@ -188,6 +196,7 @@ export function openRelationshipPicker(fromContact, { onLinked }) {
   const input = el("input");
   input.type = "text";
   input.placeholder = "Search for a contact…";
+  input.title = `Find the contact to connect ${fromContact.name} to, then choose the relationship type`;
   input.style.width = "100%";
   const results = el("div");
   results.style.marginTop = "10px";
@@ -205,6 +214,9 @@ export function openRelationshipPicker(fromContact, { onLinked }) {
     for (const type of EDGE_TYPES) {
       const b = el("button", null, type);
       b.type = "button";
+      b.title = type === "introduced"
+        ? `Record that ${fromContact.name} introduced ${target.name}. This one has a direction`
+        : `Connect ${fromContact.name} and ${target.name} as ${type}`;
       b.addEventListener("click", async () => {
         try {
           await api().edges.create({
@@ -239,6 +251,7 @@ export function openRelationshipPicker(fromContact, { onLinked }) {
       for (const r of resp.results.filter((x) => x.contactId !== fromContact.id)) {
         const row = el("button", "conn-row");
         row.type = "button";
+        row.title = `Choose ${r.name}, then pick how they are related`;
         row.append(
           el("span", null, r.name),
           el("span", "row-sub dim", r.org ?? ""),

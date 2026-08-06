@@ -7,6 +7,7 @@ const config = require("../config");
 const contactsRepo = require("../db/contacts");
 const { AppError } = require("../ipc/errors");
 const { upsertSearchRow, deleteSearchRow } = require("../db/search-projection");
+const { canonicalEndpoints } = require("../db/edges");
 const { jaroWinkler } = require("../search/engine");
 
 const normEmail = (e) => (e || "").trim().toLowerCase();
@@ -142,6 +143,9 @@ function merge(db, { primaryId, secondaryId }) {
 
     // Fields: union, primary wins conflicts.
     const fields = { ...secondary.fields, ...primary.fields };
+    // A business has no gender: merging a person into a vendor (or the
+    // reverse) must not leave a gendered business behind.
+    if (/^(yes|true|1)$/i.test(String(fields.business ?? ""))) delete fields.gender;
     const now = Date.now();
     db.prepare("UPDATE contacts SET fields = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(fields), now, primaryId);
@@ -152,9 +156,12 @@ function merge(db, { primaryId, secondaryId }) {
        VALUES (?, ?, ?, ?, ?, ?)`
     );
     for (const e of snapshot.secondaryEdges) {
-      const s = e.source_id === secondaryId ? primaryId : e.source_id;
-      const t = e.target_id === secondaryId ? primaryId : e.target_id;
-      if (s === t) continue;
+      const rs = e.source_id === secondaryId ? primaryId : e.source_id;
+      const rt = e.target_id === secondaryId ? primaryId : e.target_id;
+      if (rs === rt) continue;
+      // Re-point onto canonical endpoints so an undirected tie whose reverse
+      // already exists on the primary merges into it instead of duplicating.
+      const [s, t] = canonicalEndpoints(rs, rt, e.directed);
       const metadata = remapEdgeMetadata(e.metadata, secondaryId, primaryId);
       const info = insE.run(s, t, e.type, e.directed, metadata, e.created_at);
       if (info.changes > 0) {

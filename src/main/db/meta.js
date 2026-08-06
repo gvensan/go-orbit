@@ -53,20 +53,30 @@ function getProfile(db) {
  * a no-op. @returns {import('../../shared/types').OwnerProfile}
  */
 function setProfile(db, profile) {
+  // Only the keys actually SUBMITTED are touched: an omitted field is left
+  // as-is, and clearing takes an explicit empty string. The old behavior
+  // (delete anything absent from the payload) silently wiped stored profile
+  // fields whenever a caller submitted partially - e.g. a Settings form that
+  // failed to preload and then saved a single edit.
+  const provided = Object.keys(profile || {}).filter((k) => typeof (profile || {})[k] === "string");
   /** @type {Record<string, string>} */
   const clean = {};
-  for (const [k, v] of Object.entries(profile || {})) {
-    if (typeof v === "string" && v.trim()) clean[k] = v.trim();
+  for (const k of provided) {
+    const v = String(profile[k]).trim();
+    if (v) clean[k] = v;
   }
-  const hasAnything = clean.name || PROFILE_FIELDS.some((f) => clean[f]);
-  if (!hasAnything) return getProfile(db);
+  if (!provided.length) return getProfile(db);
+  const id0 = getOwnerContactId(db);
+  // No owner yet: only create one when something non-blank was submitted.
+  if (!id0 && !(clean.name || PROFILE_FIELDS.some((f) => clean[f]))) return getProfile(db);
 
   return db.transaction(() => {
     const id = getOwnerContactId(db);
     const existing = id ? contacts.get(db, id) : null;
-    // Preserve any non-profile fields (e.g. notes); set/clear the profile ones.
+    // Preserve any non-profile fields (e.g. notes); set/clear only submitted ones.
     const fields = { ...(existing ? existing.fields : {}) };
     for (const f of PROFILE_FIELDS) {
+      if (!provided.includes(f)) continue;
       if (clean[f]) fields[f] = clean[f];
       else delete fields[f];
     }

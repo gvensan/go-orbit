@@ -79,8 +79,65 @@ Export never blocks the UI; run it off the main thread for large graphs.
 Re-importing onto a device that already has data will otherwise manufacture
 duplicates. Import must run every incoming contact through the same match logic
 as in-app dedup. Default policy `merge`: matched contacts union their fields and
-re-point edges; unmatched contacts insert fresh. The user picks the policy in the
-import wizard.
+re-point edges; unmatched contacts insert fresh. For archives the user picks a
+single global policy in the import wizard.
+
+### 6a. Resolve step (vCard/CSV) - per-record decisions
+
+For vCard/CSV imports (not archives), the wizard adds a **Resolve** step after
+Review. It calls the read-only `import:match` channel to rank existing-contact
+candidates for each incoming record (email 1.0 / phone 0.95 / same name+company /
+fuzzy name, each with a reason, a confidence score, and a few of the candidate's
+current connections for context), and also flags incoming-vs-incoming duplicates.
+
+The guiding principle is **the user is master of every record**: match hints are
+advisory, and nothing is written until the user confirms. Two modes (persisted):
+
+- **All at once (batch):** a table with a per-row status chip (New / Possible
+  match / Likely duplicate / Duplicate in file) and a per-row decision control,
+  plus bulk actions (merge strong matches, all as new, ignore all matches) and a
+  filter.
+- **One at a time:** a card per record with the ranked candidates (reasons +
+  connections) as selectable options, plus "import as new", "ignore", and a
+  manual link to any existing contact by search.
+
+Each record's decision (`ignore` / `new` / `merge` into a chosen contact) rides
+on `import:records` and **overrides** the global policy. Smart pre-selection
+proposes the likely decision (strong match → merge; otherwise new) but never
+acts on its own. The report includes an `ignored` count.
+
+**Consider/ignore is a per-row toggle** (a switch), the single ignore control,
+present on Review rows, Resolve batch rows, and one-at-a-time cards. It lets the
+user triage the whole list and mark only the records to process this session; a
+considered record's decision is then just new-vs-merge. Ignored rows dim, skip
+name-required validation (ignore junk instead of fixing it), and import as
+`ignore` (so a record with no name is allowed only when ignored). The Review step
+shows a live tally: for consideration / complete / need attention / ignored.
+
+Triage controls sit at the header: a **Consider-all switch** (one click marks
+every record considered or ignored; ignoring all keeps the rows visible so the
+user can re-enable individual ones) and, above the header, a **Show/Hide ignored
+(N)** button (ignored rows are hidden by default) plus, when re-importing a
+results file, a **Hide/Show imported (N)** button that hides rows already
+imported in a prior run (`orbit_status`). Import is **opt-in**: every row starts
+NOT considered ("Consider all" begins clearly off), all rows are shown so the
+user can mark the ones to import, and only marked rows are written - so populating
+a few rows never silently imports the rest. Continuing with nothing marked is
+blocked. A **name search** filters the Review and Resolve lists. Pagination is
+**height-adaptive**: the row count per page is fitted to the modal's available
+space (and re-measured on resize/maximize) so the list never scrolls.
+
+### 6b. Results write-back
+
+After a vCard/CSV import, the user may save an **annotated results file** (CSV
+with an `orbit_status` column: `imported` / `merged` / `ignored`, plus a date)
+via `import:writeResults`. It is always user-initiated through a save dialog that
+defaults to the source path (CSV) so overwriting is a deliberate choice, never
+silent. On a later re-import, `orbit_status` is read back (preserved through
+parsing even when unmapped) and shown as a per-row badge. A **Save and reload**
+button on the report closes the loop: it saves the results file and reopens the
+wizard straight on it with the already-imported rows hidden, so the user can work
+through the remaining records in another pass.
 
 ## 7. Non-goals
 
@@ -93,6 +150,16 @@ mirroring the CSV ingest path: it writes a contacts sheet and, when
 `includeDetails` is set, relationship detail rows. It is a convenience export,
 not the portable `.orbit` archive, and carries no passphrase encryption, so it
 is a plaintext file the user chooses to write outside the encrypted store.
+
+Every exported CSV is written **UTF-8 with a BOM** so Excel (notably on Windows)
+renders non-ASCII names correctly, and each cell is run through a
+**spreadsheet-formula-injection guard**: a value beginning with `= + - @` (or a
+control char) is prefixed with a single quote so Excel/Sheets treat it as literal
+text - this also stops `+`-leading international phone numbers being shown as
+`#NAME?` formula errors. `parseCSV` strips the BOM, and the importer strips the
+guard quote, so a round-trip through our own import is lossless. The detailed
+(`includeDetails`) file collapses duplicate relationship rows and, since
+undirected ties are now stored canonically, no longer repeats a reciprocal tie.
 
 ## 8. Acceptance criteria
 

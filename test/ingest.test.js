@@ -68,8 +68,10 @@ test("CSV export round-trips through the importer", () => {
     { name: "NoEmail Person", fields: { company: "Globex" }, tags: [] },
   ];
   const csv = contactsToCSV(original);
-  // Header matches the import template's column order exactly.
-  assert.equal(csv.split("\r\n")[0], "name,email,phone,company,role,gender,birthday,nickname,website,linkedin,notes,tags");
+  // Export leads with a UTF-8 BOM (so Excel reads non-ASCII correctly).
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  // Header matches the import template's column order exactly (after the BOM).
+  assert.equal(csv.slice(1).split("\r\n")[0], "name,email,phone,company,role,gender,birthday,nickname,website,linkedin,notes,tags");
 
   const { headers, rows } = parseCSV(csv);
   const back = rowsToContacts(headers, rows, suggestMapping(headers));
@@ -81,6 +83,23 @@ test("CSV export round-trips through the importer", () => {
   assert.deepEqual(back[0].tags, ["vip", "alumni"]);
   assert.equal(back[1].name, "NoEmail Person");
   assert.equal(back[1].fields.company, "Globex");
+});
+
+test("CSV export neutralises formula injection yet round-trips the value", () => {
+  const original = [
+    { name: "Alice", fields: { phone: "+91 99459 99459", notes: "=cmd()", website: "@handle" }, tags: [] },
+  ];
+  const csv = contactsToCSV(original);
+  // The raw file guards dangerous leading chars so Excel/Sheets treat them as text.
+  const body = csv.slice(1).split("\r\n")[1]; // after BOM + header
+  assert.ok(body.includes("'+91 99459 99459"), "phone guarded");
+  assert.ok(body.includes("'=cmd()"), "formula guarded");
+  // But re-importing strips the guard, so the stored values are unchanged.
+  const { headers, rows } = parseCSV(csv);
+  const back = rowsToContacts(headers, rows, suggestMapping(headers));
+  assert.equal(back[0].fields.phone, "+91 99459 99459");
+  assert.equal(back[0].fields.notes, "=cmd()");
+  assert.equal(back[0].fields.website, "@handle");
 });
 
 test("CSV detailed export mirrors the Review-step columns", () => {
@@ -162,4 +181,27 @@ test("in-file duplicates are caught within one import run", (t) => {
   const r = importContacts(db, twice, { onDuplicate: "skip" });
   assert.equal(r.imported, 1);
   assert.equal(r.skipped, 1);
+});
+
+test("a business row never stores a gender (fresh insert and merge)", (t) => {
+  const { db } = makeDb(t);
+  // Source file carries both: business wins, gender is dropped on insert.
+  const r1 = importContacts(db, [
+    { name: "Acme Broadband", fields: { business: "yes", gender: "Female", phone: "+1800" }, tags: [] },
+  ], { onDuplicate: "skip" });
+  assert.equal(r1.imported, 1);
+  const vendor = contacts.get(db, 1);
+  assert.equal(vendor.fields.business, "yes");
+  assert.equal(vendor.fields.gender, undefined, "imported business kept a gender");
+
+  // Merging a business flag onto an existing gendered contact drops the gender.
+  importContacts(db, [
+    { name: "Priya Rao", fields: { email: "priya@example.com", gender: "Female" }, tags: [] },
+  ], { onDuplicate: "skip" });
+  const r2 = importContacts(db, [
+    { name: "Priya Rao", fields: { email: "priya@example.com", business: "true" }, tags: [] },
+  ], { onDuplicate: "merge" });
+  assert.equal(r2.merged, 1);
+  const merged = contacts.get(db, 2);
+  assert.equal(merged.fields.gender, undefined, "merge left a gendered business behind");
 });

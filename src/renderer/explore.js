@@ -5,9 +5,10 @@
 
 import config from "../main/config.js";
 import { el, openModal, promptModal } from "./modal.js";
-import { CITIES, CITY_COORDS } from "../shared/cities.js";
 import { pickLocationOnMap } from "./location-picker.js";
 import { toast, toastError } from "./toast.js";
+import { fieldType, validateField, normalizeFieldValue } from "../shared/field-types.js";
+import { createControl, createLocationControl, applyLocationMatch, clearLocationResolution, resolveLocation } from "./field-controls.js";
 
 const api = () => window.api;
 const ROW_H = 40;
@@ -21,11 +22,16 @@ const STATUS_LABELS = {
   hasPhone: "Has phone",
 };
 const SEGMENTS = [
-  { label: "Everyone", filters: {}, sort: "name" },
-  { label: "Needs attention", filters: { status: ["overdue", "dormant"] }, sort: "overdue" },
-  { label: "Starred", filters: { status: ["starred"] }, sort: "name" },
-  { label: "Dormant connectors", filters: { status: ["dormant"], degreeBuckets: ["hub", "connected"] }, sort: "degree" },
-  { label: "Missing email", filters: {}, sort: "name", exclude: { hasEmail: true } },
+  { label: "Everyone", filters: {}, sort: "name",
+    hint: "Clear all filters and list every contact by name" },
+  { label: "Needs attention", filters: { status: ["overdue", "dormant"] }, sort: "overdue",
+    hint: "People past their keep-in-touch cadence, or long out of contact" },
+  { label: "Starred", filters: { status: ["starred"] }, sort: "name",
+    hint: "The contacts you starred, which also pin to the top of the search palette" },
+  { label: "Dormant connectors", filters: { status: ["dormant"], degreeBuckets: ["hub", "connected"] }, sort: "degree",
+    hint: "Well-connected people you have not spoken to in a long time" },
+  { label: "Missing email", filters: {}, sort: "name", exclude: { hasEmail: true },
+    hint: "Contacts with no email address on file" },
 ];
 
 function renderTags(r) {
@@ -54,6 +60,7 @@ const dateCell = (value) => textCell(value ? fmtDate(value) : "—", "mono dim")
 // backend sort key. Every data column is sortable.
 const COLUMNS = [
   { key: "name", label: "Name", group: "Identity", sort: "name", base: true, w: 230, min: 140,
+    edit: { field: "name", kind: "name" },
     render: (r, view) => {
       const c = el("div", "xp-cell xp-name");
       if (view.state.scope === "family") {
@@ -68,17 +75,24 @@ const COLUMNS = [
       c.append(document.createTextNode(`${r.starred ? "★ " : ""}${r.name}`));
       if (r.isOwner) c.append(el("span", "xp-pill owner", "you"));
       if (r.overdue) c.append(el("span", "xp-pill overdue", "overdue"));
+      // Always-available edit popup - no mode needed. Shown on row hover.
+      const pencil = el("button", "xp-row-edit", "✎");
+      pencil.type = "button";
+      pencil.title = `Edit ${r.name}'s details`;
+      pencil.setAttribute("aria-label", `Edit ${r.name}'s details`);
+      pencil.addEventListener("click", (e) => { e.stopPropagation(); view.editContact(r.id); });
+      c.append(pencil);
       return c;
     } },
-  { key: "nickname", label: "Nickname", group: "Identity", sort: "nickname", w: 120, min: 80, render: (r) => textCell(r.nickname) },
-  { key: "gender", label: "Gender", group: "Identity", sort: "gender", w: 90, min: 60, render: (r) => textCell(r.gender) },
-  { key: "birthday", label: "Birthday", group: "Identity", sort: "birthday", w: 110, min: 90, render: (r) => dateCell(r.birthday) },
+  { key: "nickname", label: "Nickname", group: "Identity", sort: "nickname", w: 120, min: 80, edit: { field: "nickname" }, render: (r) => textCell(r.nickname) },
+  { key: "gender", label: "Gender", group: "Identity", sort: "gender", w: 90, min: 60, edit: { field: "gender", kind: "select" }, render: (r) => textCell(r.gender) },
+  { key: "birthday", label: "Birthday", group: "Identity", sort: "birthday", w: 110, min: 90, edit: { field: "birthday", kind: "date" }, render: (r) => dateCell(r.birthday) },
   { key: "deceased", label: "Deceased", group: "Identity", sort: "deceased", w: 86, min: 70, render: (r) => boolCell(r.deceased) },
-  { key: "email", label: "Email", group: "Contact", sort: "email", facet: (f) => f.status.includes("hasEmail"), w: 200, min: 120, render: (r) => textCell(r.email, "mono dim") },
-  { key: "phone", label: "Phone", group: "Contact", sort: "phone", facet: (f) => f.status.includes("hasPhone"), w: 150, min: 100, render: (r) => textCell(r.phone, "mono dim") },
-  { key: "org", label: "Company", group: "Work", sort: "org", base: true, w: 170, min: 100, render: (r) => textCell(r.org) },
-  { key: "role", label: "Role", group: "Work", sort: "role", w: 150, min: 90, render: (r) => textCell(r.role) },
-  { key: "location", label: "Location entered", group: "Location", sort: "location", w: 190, min: 110, render: (r) => textCell(r.location) },
+  { key: "email", label: "Email", group: "Contact", sort: "email", facet: (f) => f.status.includes("hasEmail"), w: 200, min: 120, edit: { field: "email" }, render: (r) => textCell(r.email, "mono dim") },
+  { key: "phone", label: "Phone", group: "Contact", sort: "phone", facet: (f) => f.status.includes("hasPhone"), w: 150, min: 100, edit: { field: "phone" }, render: (r) => textCell(r.phone, "mono dim") },
+  { key: "org", label: "Company", group: "Work", sort: "org", base: true, w: 170, min: 100, edit: { field: "company" }, render: (r) => textCell(r.org) },
+  { key: "role", label: "Role", group: "Work", sort: "role", w: 150, min: 90, edit: { field: "role" }, render: (r) => textCell(r.role) },
+  { key: "location", label: "Location entered", group: "Location", sort: "location", w: 190, min: 110, edit: { field: "location", kind: "location" }, render: (r) => textCell(r.location) },
   { key: "city", label: "City", group: "Location", sort: "city", w: 130, min: 85, render: (r) => textCell(r.city) },
   { key: "county", label: "County", group: "Location", sort: "county", w: 130, min: 85, render: (r) => textCell(r.county) },
   { key: "state", label: "State / region", group: "Location", sort: "state", w: 140, min: 90, render: (r) => textCell(r.state) },
@@ -89,15 +103,15 @@ const COLUMNS = [
   { key: "degree", label: "Connections", group: "Network", sort: "degree", base: true, w: 92, min: 70, render: (r) => textCell(r.degree, "mono dim") },
   { key: "tags", label: "Tags", group: "Network", sort: "tags", base: true, w: 170, min: 90,
     render: renderTags },
-  { key: "notes", label: "Notes", group: "Activity", sort: "notes", w: 240, min: 120, render: (r) => textCell(r.notes) },
+  { key: "notes", label: "Notes", group: "Activity", sort: "notes", w: 240, min: 120, edit: { field: "notes" }, render: (r) => textCell(r.notes) },
   { key: "last", label: "Last interaction", group: "Activity", sort: "recent", base: true, w: 110, min: 82, render: (r) => textCell(fmtLast(r.lastAt), "mono dim") },
   { key: "lastKind", label: "Last type", group: "Activity", sort: "lastKind", w: 90, min: 70, render: (r) => textCell(r.lastKind) },
   { key: "lastNote", label: "Last interaction note", group: "Activity", sort: "lastNote", w: 220, min: 120, render: (r) => textCell(r.lastNote) },
   { key: "interactionCount", label: "Interactions", group: "Activity", sort: "interactionCount", w: 90, min: 70, render: (r) => textCell(r.interactionCount, "mono dim") },
   { key: "cadenceDays", label: "Cadence", group: "Activity", sort: "cadenceDays", w: 90, min: 70, render: (r) => textCell(r.cadenceDays ? `${r.cadenceDays}d` : "—", "mono dim") },
   { key: "starred", label: "Starred", group: "Activity", sort: "starred", w: 76, min: 60, render: (r) => boolCell(r.starred, "★") },
-  { key: "website", label: "Website", group: "Web", sort: "website", w: 190, min: 110, render: (r) => textCell(r.website, "mono dim") },
-  { key: "linkedin", label: "LinkedIn", group: "Web", sort: "linkedin", w: 190, min: 110, render: (r) => textCell(r.linkedin, "mono dim") },
+  { key: "website", label: "Website", group: "Web", sort: "website", w: 190, min: 110, edit: { field: "website" }, render: (r) => textCell(r.website, "mono dim") },
+  { key: "linkedin", label: "LinkedIn", group: "Web", sort: "linkedin", w: 190, min: 110, edit: { field: "linkedin" }, render: (r) => textCell(r.linkedin, "mono dim") },
   { key: "id", label: "ID", group: "System", sort: "id", w: 64, min: 50, render: (r) => textCell(r.id, "mono dim") },
   { key: "createdAt", label: "Created", group: "System", sort: "createdAt", w: 120, min: 90, render: (r) => dateCell(r.createdAt) },
   { key: "updatedAt", label: "Updated", group: "System", sort: "updatedAt", w: 120, min: 90, render: (r) => dateCell(r.updatedAt) },
@@ -136,6 +150,11 @@ export class ExploreView {
     };
     this.selected = new Set();
     this.familyCollapsed = new Set();
+    // In-place cell editing: a row click opens the contact unless the toolbar
+    // toggle flips clicks to edit-the-cell. Persisted - a mid-cleanup restart
+    // must not silently drop the mode and turn edit clicks into navigation.
+    this.editMode = localStorage.getItem("orbit-explore-edit") === "1";
+    this._editingCell = false;
     this.lastResponse = null;
     this.runVersion = 0;
     this.debounce = null;
@@ -151,13 +170,21 @@ export class ExploreView {
 
   build() {
     this.root.innerHTML = "";
+    this.root.classList.toggle("xp-editing", this.editMode); // restored mode styles from the first paint
     const bar = el("div", "xp-bar");
     this.input = el("input");
     this.input.type = "text";
     this.input.placeholder = "Filter people…  try  org:acme  tag:vip  has:email  near:\"Bo\" hops:2";
+    this.input.title = "Type to filter by name, company, or role. Operators narrow it further: org:acme, tag:vip, type:family, has:email, near:\"Bo\", hops:2";
     this.scopeToggle = el("div", "xp-scope-toggle");
+    const SCOPE_TITLES = {
+      all: "Show every contact",
+      family: "Show only family, nested from you along recorded family connections",
+      friends: "Show only contacts connected to you as friends",
+    };
     for (const [value, label] of [["all", "ALL"], ["family", "FAMILY"], ["friends", "FRIENDS"]]) {
       const b = el("button", null, label); b.type = "button"; b.dataset.scope = value;
+      b.title = SCOPE_TITLES[value];
       b.addEventListener("click", () => {
         if (this.state.scope === value) return;
         this.state.scope = /** @type {"all"|"family"|"friends"} */ (value); this.selected.clear(); this.scroller.scrollTop = 0; this.run();
@@ -165,7 +192,21 @@ export class ExploreView {
       this.scopeToggle.append(b);
     }
     this.count = el("span", "xp-count mono");
-    bar.append(this.input, this.scopeToggle, this.count);
+    this.count.title = "How many people match the current filters";
+    // Clear (✕) inside the filter box, shown only while there is text.
+    const inputWrap = el("div", "xp-input-wrap");
+    this.clearBtn = el("button", "xp-input-clear", "✕");
+    this.clearBtn.type = "button";
+    this.clearBtn.title = "Clear the filter";
+    this.clearBtn.setAttribute("aria-label", "Clear the filter");
+    this.clearBtn.hidden = true;
+    this.clearBtn.addEventListener("click", () => {
+      this.input.value = "";
+      this.input.dispatchEvent(new Event("input")); // one path: same clearing rules as typing
+      this.input.focus();
+    });
+    inputWrap.append(this.input, this.clearBtn);
+    bar.append(inputWrap, this.scopeToggle, this.count);
     this.root.append(bar);
     this.familyNote = el("div", "xp-family-note", "Family is nested from you through recorded family connections. Indentation shows relationship paths, not legal or biological parentage.");
     this.familyNote.hidden = true;
@@ -192,6 +233,7 @@ export class ExploreView {
 
     this.input.addEventListener("input", () => {
       this.state.text = this.input.value;
+      this.clearBtn.hidden = !this.input.value;
       // A changed query defines a new working set. Never let an invisible
       // selection from the previous query receive a bulk action.
       if (this.selected.size) {
@@ -263,6 +305,9 @@ export class ExploreView {
       cb.type = "checkbox";
       cb.checked = c.key === "name" || this.colVisible.has(c.key) || forced;
       cb.disabled = c.key === "name" || forced; // name is required; a filter pins its column
+      rowEl.title = c.key === "name" ? "Name is always shown"
+        : forced ? `${c.label} is pinned while its filter is active`
+        : cb.checked ? `Hide the ${c.label} column` : `Show the ${c.label} column`;
       cb.addEventListener("change", () => {
         if (cb.checked) this.colVisible.add(c.key); else this.colVisible.delete(c.key);
         saveVisible(this.colVisible);
@@ -309,6 +354,7 @@ export class ExploreView {
     this.state.text = "";
     this.state.exclude = seg.exclude ?? {};
     this.input.value = "";
+    this.clearBtn.hidden = true;
     this.selected.clear();
     this.run();
   }
@@ -382,6 +428,9 @@ export class ExploreView {
     check.setAttribute("aria-label", "Select all shown");
     const shown = this.displayResults();
     check.checked = shown.length > 0 && shown.every((r) => this.selected.has(r.id));
+    check.title = check.checked
+      ? "Unselect every row shown"
+      : `Select all ${shown.length} rows shown, so bulk actions apply to just them`;
     check.addEventListener("click", () => this.toggleSelectAll(check.checked));
     const cw = el("div", "xp-cell xp-check xp-sticky-check");
     cw.append(check);
@@ -413,13 +462,18 @@ export class ExploreView {
       const labelBtn = el("button", "xp-th-label" + (col.sort ? " sortable" : ""), col.label + arrow);
       labelBtn.type = "button";
       if (col.sort) {
+        labelBtn.title = active
+          ? `Sorted by ${col.label}, ${this.state.dir === "asc" ? "ascending" : "descending"}. Click to reverse`
+          : `Sort by ${col.label}`;
         labelBtn.addEventListener("click", () => this.sortBy(col));
       } else {
+        labelBtn.title = `${col.label} cannot be sorted`;
         labelBtn.disabled = true;
       }
       cell.append(labelBtn);
       // Resize grip on the right edge (all but a trailing tiny column).
       const grip = el("div", "xp-resize");
+      grip.title = `Drag to resize the ${col.label} column`;
       grip.addEventListener("mousedown", (e) => this.onResizeStart(e, col));
       cell.append(grip);
       this.tableHead.append(cell);
@@ -538,6 +592,7 @@ export class ExploreView {
     for (const seg of SEGMENTS) {
       const b = el("button", "facet-seg", seg.label);
       b.type = "button";
+      b.title = seg.hint;
       b.addEventListener("click", () => this.loadSegment(seg));
       segs.append(b);
     }
@@ -549,10 +604,11 @@ export class ExploreView {
       for (const s of this.savedSearches) {
         const b = el("button", "facet-seg", s.name);
         b.type = "button";
-        b.title = s.query;
+        b.title = `Saved segment. Runs: ${s.query}`;
         b.addEventListener("click", () => {
           this.state.text = s.query;
           this.input.value = s.query;
+          this.clearBtn.hidden = !s.query;
           this.run();
         });
         saved.append(b);
@@ -590,6 +646,7 @@ export class ExploreView {
         const search = el("input", "facet-search");
         search.type = "text";
         search.placeholder = `Search ${title.toLowerCase()}…`;
+        search.title = `Narrow the ${title.toLowerCase()} list below. This does not filter the table on its own`;
         search.value = ui.filter;
         search.addEventListener("input", () => {
           ui.filter = search.value;
@@ -609,6 +666,10 @@ export class ExploreView {
     for (const v of list) {
       const isOn = active.includes(v.value);
       const row = el("label", "facet-row" + (isOn ? " on" : ""));
+      const name = v.label ?? v.value;
+      row.title = isOn
+        ? `Stop filtering by ${name}`
+        : `Show only the ${v.count} ${v.count === 1 ? "person" : "people"} matching ${name}`;
       const cb = el("input");
       cb.type = "checkbox";
       cb.checked = isOn;
@@ -621,6 +682,9 @@ export class ExploreView {
     if (overflowable && shown.length > FACET_COLLAPSE) {
       const more = el("button", "facet-more", ui.expanded ? "Show less" : `Show all ${shown.length}`);
       more.type = "button";
+      more.title = ui.expanded
+        ? `Collapse back to the top ${FACET_COLLAPSE}`
+        : `Expand to all ${shown.length}, with a search box`;
       more.addEventListener("click", () => {
         ui.expanded = !ui.expanded;
         if (!ui.expanded) ui.filter = "";
@@ -695,6 +759,8 @@ export class ExploreView {
       const cb = el("input");
       cb.type = "checkbox";
       cb.checked = this.selected.has(r.id);
+      cb.title = this.selected.has(r.id) ? `Unselect ${r.name}` : `Select ${r.name} for a bulk action`;
+      cb.setAttribute("aria-label", cb.title);
       cb.addEventListener("click", (e) => {
         e.stopPropagation();
         this.selected.has(r.id) ? this.selected.delete(r.id) : this.selected.add(r.id);
@@ -705,10 +771,236 @@ export class ExploreView {
       const check = el("div", "xp-cell xp-check xp-sticky-check");
       check.append(cb);
       row.append(check);
-      for (const col of cols) row.append(col.render(r, this));
-      row.addEventListener("click", () => this.handlers.onOpenContact(r.id));
+      for (const col of cols) {
+        const cell = col.render(r, this);
+        if (col.edit) cell.dataset.editKey = col.key;
+        row.append(cell);
+      }
+      row.addEventListener("click", (e) => {
+        if (this.editMode) {
+          const cellEl = /** @type {HTMLElement|null} */ ((/** @type {HTMLElement} */ (e.target)).closest?.("[data-edit-key]"));
+          if (cellEl && !this._editingCell) this.beginCellEdit(cellEl, cellEl.dataset.editKey, r);
+          // Dead silence reads as "broken": say why nothing opened.
+          else if (!cellEl && !this._editingCell) toast("That column isn't editable. Turn off Edit to open the contact.");
+          return; // edit mode never navigates away mid-edit
+        }
+        this.handlers.onOpenContact(r.id);
+      });
       this.rowsEl.append(row);
     }
+  }
+
+  /** In-place cell editor (edit mode): Enter/blur commits, Esc cancels.
+   *  The controls are the card's OWN editors from field-controls.js - the
+   *  phone country widget, the date picker, the gender preset list, the notes
+   *  textarea - and every value runs through the shared validation +
+   *  normalization, so an Explore edit is byte-identical to a card edit.
+   *  Location resolves through the same offline-city-then-geocoder pipeline
+   *  the card uses, writing the same resolution keys. */
+  async beginCellEdit(cellEl, colKey, r) {
+    const col = COLUMNS.find((c) => c.key === colKey);
+    if (!col?.edit) return;
+    // Rich controls (the phone widget, location resolution, the notes
+    // textarea) live in the edit POPUP: a modal is immune to the grid's
+    // virtualization, sticky columns, and cell clipping. In-cell editing
+    // stays for the simple one-line values.
+    if (fieldType(col.edit.field) === "tel" || col.edit.kind === "location" || col.edit.field === "notes") {
+      this.editContact(r.id, col.edit.field);
+      return;
+    }
+    // A failure to open the editor must SAY so and must not leave the
+    // _editingCell latch stuck (which would silently kill all later edits).
+    try {
+      this.openCellEditor(cellEl, col, r);
+    } catch (err) {
+      this._editingCell = false;
+      toastError(err);
+    }
+  }
+
+  /** The edit popup: every supported field on one form, using the SAME shared
+   *  controls and validation as the contact card. Reachable from the per-row
+   *  pencil with NO mode required, so editing a phone number never depends on
+   *  the edit-mode toggle or in-cell layout. `focusKey` preselects a field. */
+  async editContact(id, focusKey) {
+    let contact;
+    try { contact = await api().contacts.get({ id }); } catch (err) { toastError(err); return; }
+    if (!contact) { toast("That contact is no longer available."); return; }
+    // Distinct existing values power the type-ahead lists, like the sidebar.
+    if (!this.fieldValues) {
+      try { this.fieldValues = await api().explore.fieldValues({}); } catch { this.fieldValues = {}; }
+    }
+    const m = openModal({ title: `Edit · ${contact.name}` });
+    // Autocomplete datalists for company/role (createControl points inputs at
+    // these ids). The contact card builds identically-named ones; only add
+    // ours when the card's are not in the DOM.
+    if (!document.getElementById("dl-company")) {
+      const dls = el("div");
+      const mkdl = (dlId, values) => {
+        const dl = el("datalist");
+        dl.id = dlId;
+        for (const v of values ?? []) dl.append(new Option(v));
+        dls.append(dl);
+      };
+      mkdl("dl-company", this.fieldValues?.company);
+      mkdl("dl-role", this.fieldValues?.role);
+      m.body.append(dls);
+    }
+    const FIELDS = [
+      { key: "name", label: "Name" }, { key: "gender", label: "Gender" },
+      { key: "email", label: "Email" }, { key: "phone", label: "Phone" },
+      { key: "company", label: "Company" }, { key: "role", label: "Role" },
+      { key: "birthday", label: "Birthday" }, { key: "location", label: "Location / address" },
+      { key: "nickname", label: "Nickname" }, { key: "website", label: "Website" },
+      { key: "linkedin", label: "LinkedIn" }, { key: "notes", label: "Notes" },
+    ];
+    const grid = el("div", "xp-editform");
+    /** @type {Map<string, { ctrl: any }>} */
+    const ctrls = new Map();
+    for (const f of FIELDS) {
+      const val = f.key === "name" ? contact.name : (contact.fields[f.key] ?? "");
+      // Location gets the live-suggestion control (bundled cities + online
+      // geocoder while typing), same behavior as the sidebar's location row.
+      const ctrl = f.key === "location"
+        ? createLocationControl(String(val))
+        : createControl(f.key, String(val), null);
+      const lab = el("label", "xp-editform-key mono", f.label);
+      if (f.key === "location") lab.title = "Pick a suggestion to put this contact on the map. Your text is kept exactly as entered either way";
+      grid.append(lab, ctrl.element);
+      ctrls.set(f.key, { ctrl });
+    }
+    m.body.append(grid);
+    const err = el("p", "field-err");
+    err.hidden = true;
+    m.body.append(err);
+
+    const cancel = el("button", null, "Cancel");
+    cancel.type = "button";
+    cancel.title = "Close without saving any of these changes (Esc)";
+    cancel.addEventListener("click", () => m.close());
+    const save = el("button", "primary", "Save");
+    save.type = "button";
+    save.title = `Save every field above to ${contact.name}`;
+    save.addEventListener("click", async () => {
+      err.hidden = true;
+      // Validate everything before writing anything.
+      const values = new Map();
+      for (const [key, { ctrl }] of ctrls) {
+        const v = key === "name" ? String(ctrl.read()).trim() : normalizeFieldValue(key, ctrl.read());
+        if (key === "name" && !v) { err.textContent = "A contact needs a name."; err.hidden = false; return; }
+        if (key !== "name") {
+          const msg = validateField(fieldType(key), v);
+          if (msg) { err.textContent = `${key}: ${msg}`; err.hidden = false; ctrl.setInvalid(true); return; }
+        }
+        values.set(key, v);
+      }
+      save.disabled = true;
+      try {
+        const fields = { ...contact.fields };
+        for (const [key, v] of values) {
+          if (key === "name") continue;
+          if (v) fields[key] = v;
+          else delete fields[key];
+        }
+        // Location save semantics shared with the card: text as typed, the
+        // resolution keys beside it (re-resolved when the text changed or was
+        // never mapped), cleared when nothing maps.
+        const loc = values.get("location") ?? "";
+        if (loc !== (contact.fields.location ?? "") || (loc && !fields.geo)) {
+          // A suggestion picked in the control carries its structured match;
+          // free-typed text falls back to the shared resolver.
+          const locCtrl = /** @type {any} */ (ctrls.get("location")?.ctrl);
+          const match = loc ? (locCtrl?.match?.(loc) ?? await resolveLocation(loc)) : null;
+          if (match) applyLocationMatch(fields, match);
+          else clearLocationResolution(fields);
+        }
+        await api().contacts.update({ id, patch: { name: values.get("name"), fields } });
+        m.close();
+        toast("Saved.");
+        await this.run();
+        await this.handlers.onChanged();
+      } catch (e2) {
+        save.disabled = false;
+        toastError(e2);
+      }
+    });
+    m.foot.append(cancel, save);
+    ctrls.get(focusKey && ctrls.has(focusKey) ? focusKey : "name")?.ctrl.focus();
+  }
+
+  openCellEditor(cellEl, col, r) {
+    this._editingCell = true;
+    const field = col.edit.field;
+    const isName = col.edit.kind === "name";
+    const isLocation = col.edit.kind === "location";
+    const current = String((isName ? r.name : r[col.key]) ?? "");
+
+    const ctrl = createControl(isName ? "name" : field, current, null);
+    ctrl.element.classList.add("xp-cell-input");
+    cellEl.innerHTML = "";
+    cellEl.classList.add("xp-cell-editing");
+    cellEl.append(ctrl.element);
+    ctrl.focus();
+
+    let settled = false;
+    const done = () => {
+      settled = true;
+      this._editingCell = false;
+      cellEl.classList.remove("xp-cell-editing");
+      this.renderRows(); // repaint from data (commit or cancel alike)
+    };
+    const commit = async () => {
+      if (settled) return;
+      const raw = ctrl.read();
+      const value = isName ? String(raw).trim() : normalizeFieldValue(field, raw);
+      if (value === current || (isName && !value)) { done(); return; } // unchanged, or a name cannot blank
+      if (!isName) {
+        const msg = validateField(fieldType(field), value);
+        if (msg) { ctrl.setInvalid(true); toast(msg); return; } // stay in the editor
+      }
+      try {
+        if (isName) {
+          await api().contacts.update({ id: r.id, patch: { name: value } });
+        } else {
+          // patch.fields replaces the whole map: merge onto the live record so
+          // one cell edit can never drop the contact's other fields.
+          const contact = await api().contacts.get({ id: r.id });
+          if (!contact) { toast("That contact is no longer available."); done(); return; }
+          const fields = { ...contact.fields };
+          if (value) fields[field] = value;
+          else delete fields[field];
+          if (isLocation) {
+            // Same save semantics as the card: text stays as typed, and the
+            // resolution keys ride beside it (or clear when nothing maps).
+            const match = value ? await resolveLocation(value) : null;
+            if (match) applyLocationMatch(fields, match);
+            else clearLocationResolution(fields);
+            toast(match ? `Mapped · ${match.precision || "place"}` : value ? "Saved as entered · not mapped" : "Location cleared");
+          }
+          await api().contacts.update({ id: r.id, patch: { fields } });
+        }
+        done();
+        await this.run();               // fresh projection for the table
+        await this.handlers.onChanged(); // graph + counters follow
+      } catch (err) {
+        done();
+        toastError(err);
+      }
+    };
+    ctrl.element.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !ctrl.multiline) { e.preventDefault(); commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); done(); }
+      e.stopPropagation();
+    });
+    ctrl.element.addEventListener("click", (e) => e.stopPropagation()); // don't re-enter
+    // Commit when focus leaves the WHOLE control: the phone widget moves focus
+    // between its own country/area/number parts, and that must not commit.
+    ctrl.element.addEventListener("focusout", (e) => {
+      const to = /** @type {Node|null} */ (e.relatedTarget);
+      if (to && ctrl.element.contains(to)) return;
+      commit();
+    });
+    if (ctrl.isSelect) ctrl.element.addEventListener("change", () => commit()); // picking an option IS the commit
   }
 
   // --------------------------------------------------------------- bulk --
@@ -740,31 +1032,62 @@ export class ExploreView {
       });
       this.bulk.append(clearSelection);
     }
-    this.bulk.append(el("span", "mono xp-scope", n ? `${n} selected` : `${scopeN.toLocaleString()} in view`));
-    const btn = (text, cls, fn) => {
+    const scopeEl = el("span", "mono xp-scope", n ? `${n} selected` : `${scopeN.toLocaleString()} in view`);
+    // Bulk actions silently target the whole filtered set when nothing is
+    // ticked, so say which set the buttons beside this will hit.
+    scopeEl.title = n
+      ? `The buttons here act on the ${n} selected contact${n === 1 ? "" : "s"}`
+      : `Nothing is selected, so the buttons here act on all ${scopeN.toLocaleString()} contacts matching the current filters`;
+    this.bulk.append(scopeEl);
+    const target = n ? `the ${n} selected contact${n === 1 ? "" : "s"}` : `all ${scopeN.toLocaleString()} contacts in view`;
+    const btn = (text, cls, fn, title) => {
       const b = el("button", cls, text);
       b.type = "button";
+      if (title) b.title = title;
       b.addEventListener("click", fn);
       this.bulk.append(b);
     };
-    btn("Show on graph", "primary", () => this.handlers.onShowOnGraph(this.targetIds()));
-    btn("Add tag…", null, () => this.bulkTag());
+    btn("Show on graph", "primary", () => this.handlers.onShowOnGraph(this.targetIds()),
+      `Switch to the Network view with ${target} highlighted`);
+    btn("Add tag…", null, () => this.bulkTag(), `Add one tag to ${target}`);
     const fieldBtn = el("button", null, "Set common field…");
     fieldBtn.type = "button"; fieldBtn.disabled = n === 0;
     fieldBtn.title = n ? "Apply one shared value to the selected contacts" : "Select contacts first";
     fieldBtn.addEventListener("click", () => this.bulkCommonField());
     this.bulk.append(fieldBtn);
-    btn("Set cadence…", null, () => this.bulkCadence());
-    btn("Star", null, () => this.bulkStar(true));
-    btn("Unstar", null, () => this.bulkStar(false)); // binary option, both ways
-    btn("Save as segment…", null, () => this.saveSegment());
+    btn("Set cadence…", null, () => this.bulkCadence(),
+      `Set how often you mean to be in touch with ${target}`);
+    btn("Star", null, () => this.bulkStar(true), `Star ${target}`);
+    btn("Unstar", null, () => this.bulkStar(false), `Remove the star from ${target}`); // binary option, both ways
+    btn("Save as segment…", null, () => this.saveSegment(),
+      "Save the current filters under a name, so you can rerun them from the Segments list");
     if (n) {
-      btn("Delete", "danger", () => this.bulkDelete());
+      btn("Delete", "danger", () => this.bulkDelete(),
+        `Move the ${n} selected contact${n === 1 ? "" : "s"} to the trash. You can undo this`);
     }
-    // Column chooser, pushed to the right end of the toolbar.
+    // Column chooser + edit mode, pushed to the right end of the toolbar.
     this.bulk.append(el("div", "xp-bulk-spacer"));
+    // The label states the MODE, not the action, so on/off is unmistakable.
+    const editBtn = el("button", "xp-edit-btn" + (this.editMode ? " active" : ""), this.editMode ? "✎ Editing on" : "✎ Edit");
+    editBtn.type = "button";
+    editBtn.setAttribute("aria-pressed", String(this.editMode));
+    editBtn.title = this.editMode
+      ? "Editing is ON: click any highlighted value to change it. Click here to go back to browsing."
+      : "Edit cells in place: click a value to change it, Enter saves, Esc cancels";
+    editBtn.addEventListener("click", () => {
+      this.editMode = !this.editMode;
+      localStorage.setItem("orbit-explore-edit", this.editMode ? "1" : "0");
+      this.root.classList.toggle("xp-editing", this.editMode);
+      toast(this.editMode
+        ? "Edit mode on - click a value to change it. Rows no longer open the contact."
+        : "Edit mode off - clicking a row opens the contact again.");
+      this.renderRows();
+      this.renderBulk();
+    });
+    this.bulk.append(editBtn);
     const colsBtn = el("button", "xp-cols-btn", "Columns ▾");
     colsBtn.type = "button";
+    colsBtn.title = "Choose which columns the table shows. Your choice is remembered";
     colsBtn.addEventListener("click", () => this.openColumnMenu(colsBtn));
     this.bulk.append(colsBtn);
   }
@@ -797,250 +1120,143 @@ export class ExploreView {
     if (ids) toast(`Tagged ${ids.length} with "${clean}".`);
   }
 
+  /** Bulk "Set common field": one value applied to every selected contact.
+   *  The field list, controls, validation, and normalization are the SIDEBAR's
+   *  (shared field-controls + field-types), so a bulk write can never produce
+   *  a value a card edit could not. Location keeps its bulk extra - a manual
+   *  pin on the map - on top of the shared suggestion control. */
   async bulkCommonField() {
     if (!this.selected.size) return;
+    if (!this.fieldValues) {
+      try { this.fieldValues = await api().explore.fieldValues({}); } catch { this.fieldValues = {}; }
+    }
     const choice = await new Promise((resolve) => {
       let settled = false;
       const settle = (value) => { if (!settled) { settled = true; resolve(value); } };
       const m = openModal({ title: `Set a common field for ${this.selected.size} contacts`, onClose: () => settle(null) });
-      const fieldRow = el("div", "form-row"); fieldRow.append(el("label", null, "Field"));
+
+      // Autocomplete datalists (company/role), unless the card's are mounted.
+      if (!document.getElementById("dl-company")) {
+        const dls = el("div");
+        for (const [dlId, values] of [["dl-company", this.fieldValues?.company], ["dl-role", this.fieldValues?.role]]) {
+          const dl = el("datalist");
+          dl.id = dlId;
+          for (const v of values ?? []) dl.append(new Option(v));
+          dls.append(dl);
+        }
+        m.body.append(dls);
+      }
+
+      const form = el("div", "bulk-field-form");
+      const fieldRow = el("div", "bulk-field-row");
+      fieldRow.append(el("label", "xp-editform-key mono", "Field"));
       const field = el("select");
+      field.title = "Which field to write on every selected contact";
       for (const [value, label] of [
         ["location", "Location / address"], ["company", "Company"], ["role", "Role"],
         ["gender", "Gender"], ["notes", "Notes (append)"], ["website", "Website"],
         ["linkedin", "LinkedIn"], ["deceased", "Deceased status"],
       ]) field.append(new Option(label, value));
       fieldRow.append(field);
-      const valueRow = el("div", "form-row"); valueRow.append(el("label", null, "Value"));
-      let control;
-      let controlHost;
-      let locationMatch = null;
-      let locationTimer = null;
-      let locationQuery = 0;
-      let onlineLocation = false;
-      let resolveLocationControl = async () => null;
-      let getLocationMatch = () => null;
-      const onlineLocationReady = api().location.online({}).then(
-        (result) => { onlineLocation = !!result.enabled; },
-        () => { onlineLocation = false; }
-      );
+      const valueRow = el("div", "bulk-field-row");
+      valueRow.append(el("label", "xp-editform-key mono", "Value"));
+      const valueHost = el("div", "bulk-field-value");
+      valueRow.append(valueHost);
+      form.append(fieldRow, valueRow);
+      m.body.append(form,
+        el("p", "dim field-hint", "Existing notes are preserved; other fields are replaced (a blank value clears the field). Location resolution is shared across the selection."));
+      const err = el("p", "field-err");
+      err.hidden = true;
+      m.body.append(err);
 
-      const offlineMatch = (value) => CITY_COORDS[value]
-        ? { label: value, place: value, lat: CITY_COORDS[value][0], lon: CITY_COORDS[value][1], precision: "city", source: "offline-city", components: {} }
-        : null;
-
-      const buildLocationControl = () => {
-        const editor = el("div", "bulk-location-editor");
-        const wrap = el("div", "location-input-wrap");
-        const input = /** @type {HTMLInputElement} */ (el("input"));
-        input.type = "text";
-        input.placeholder = "City, neighborhood, or full address";
-        input.autocomplete = "off";
-        input.setAttribute("role", "combobox");
-        input.setAttribute("aria-autocomplete", "list");
-        input.setAttribute("aria-expanded", "false");
-        const menu = el("div", "location-suggestions");
-        menu.id = `bulk-location-suggestions-${Date.now()}`;
-        menu.setAttribute("role", "listbox");
-        menu.hidden = true;
-        input.setAttribute("aria-controls", menu.id);
-        wrap.append(input, menu);
-        const resolution = el("span", "field-hint location-resolution dim", "Enter a location to resolve it");
-        const pin = el("button", "location-pin-btn", "Place pin on map");
-        pin.type = "button";
-        pin.disabled = true;
-        const meta = el("div", "bulk-location-meta");
-        meta.append(resolution, pin);
-        editor.append(wrap, meta);
-
-        const matchesByLabel = new Map();
-        let suggestions = [];
-        let active = -1;
-        const showResolution = (match, state = "") => {
-          resolution.className = `field-hint location-resolution ${match ? "is-mapped" : "dim"}`;
-          resolution.textContent = state || (match
-            ? `● mapped · ${match.precision || "place"}${match.place && match.place !== input.value.trim() ? ` · ${match.place}` : ""}`
-            : input.value.trim() ? "○ saved as entered · not mapped" : "Enter a location to resolve it");
-          pin.textContent = match ? "Adjust pin on map" : "Place pin on map";
-          pin.disabled = !input.value.trim();
-        };
-        const hideSuggestions = () => {
-          menu.hidden = true;
-          input.setAttribute("aria-expanded", "false");
-          input.removeAttribute("aria-activedescendant");
-          active = -1;
-        };
-        const chooseSuggestion = (index) => {
-          const match = suggestions[index];
-          if (!match) return;
-          input.value = match.label;
-          locationMatch = match;
-          matchesByLabel.set(match.label, match);
-          hideSuggestions();
-          showResolution(match);
-        };
-        const renderSuggestions = (items) => {
-          suggestions = items.slice(0, 8);
-          active = -1;
-          menu.innerHTML = "";
-          for (const [index, match] of suggestions.entries()) {
-            const option = el("button", "location-suggestion");
-            option.type = "button";
-            option.id = `${menu.id}-${index}`;
-            option.setAttribute("role", "option");
-            option.append(
-              el("span", "location-suggestion-label", match.label),
-              el("span", "location-suggestion-kind", match.precision || "place"),
-            );
-            option.addEventListener("mousedown", (event) => event.preventDefault());
-            option.addEventListener("click", () => chooseSuggestion(index));
-            menu.append(option);
-          }
-          menu.hidden = !suggestions.length;
-          input.setAttribute("aria-expanded", String(!!suggestions.length));
-        };
-        const showMessage = (message) => {
-          suggestions = []; active = -1; menu.innerHTML = "";
-          menu.append(el("div", "location-suggestion-message dim", message));
-          menu.hidden = false;
-          input.setAttribute("aria-expanded", "false");
-        };
-        const setActive = (index) => {
-          if (!suggestions.length) return;
-          active = (index + suggestions.length) % suggestions.length;
-          [...menu.children].forEach((node, i) => {
-            node.classList.toggle("active", i === active);
-            node.setAttribute("aria-selected", String(i === active));
-          });
-          const node = menu.children[active];
-          if (node) {
-            input.setAttribute("aria-activedescendant", node.id);
-            node.scrollIntoView({ block: "nearest" });
-          }
-        };
-        const resolveLocation = async () => {
-          const value = input.value.trim();
-          if (!value) { locationMatch = null; showResolution(null); return null; }
-          let match = matchesByLabel.get(value) || offlineMatch(value);
-          if (!match && navigator.onLine) {
-            await onlineLocationReady;
-            if (onlineLocation) {
-              showResolution(null, "resolving address…");
-              try { match = (await api().location.search({ query: value }))?.[0] ?? null; } catch { /* preserve free text */ }
-            }
-          }
-          locationMatch = match;
-          if (match) matchesByLabel.set(value, match);
-          showResolution(match);
-          return match;
-        };
-
-        input.addEventListener("input", () => {
-          locationMatch = null;
-          showResolution(null);
-          const query = input.value.trim();
-          const queryId = ++locationQuery;
-          if (locationTimer) clearTimeout(locationTimer);
-          if (query.length < 2) { hideSuggestions(); return; }
-          const needle = query.toLocaleLowerCase();
-          const local = CITIES
-            .filter((name) => CITY_COORDS[name] && name.toLocaleLowerCase().includes(needle))
-            .slice(0, 8)
-            .map((label) => offlineMatch(label));
-          for (const match of local) matchesByLabel.set(match.label, match);
-          if (local.length) renderSuggestions(local);
-          else if (onlineLocation && navigator.onLine) showMessage("Searching addresses…");
-          else showMessage("No offline city match · enable online location search for addresses");
-          locationTimer = setTimeout(async () => {
-            if (!navigator.onLine) return;
-            await onlineLocationReady;
-            if (!onlineLocation) return;
-            try {
-              const remote = await api().location.search({ query });
-              if (queryId !== locationQuery) return;
-              const merged = [...(remote || []), ...local].filter((match, index, all) =>
-                all.findIndex((other) => other.label.toLocaleLowerCase() === match.label.toLocaleLowerCase()) === index
-              );
-              for (const match of merged) matchesByLabel.set(match.label, match);
-              if (merged.length) renderSuggestions(merged);
-              else showMessage("No matching address found · your text can still be saved");
-            } catch { /* local suggestions remain usable */ }
-          }, 280);
-        });
-        input.addEventListener("blur", () => setTimeout(hideSuggestions, 120));
-        input.addEventListener("keydown", (event) => {
-          if (event.key === "ArrowDown" && suggestions.length && !menu.hidden) {
-            event.preventDefault(); setActive(active + 1);
-          } else if (event.key === "ArrowUp" && suggestions.length && !menu.hidden) {
-            event.preventDefault(); setActive(active < 0 ? suggestions.length - 1 : active - 1);
-          } else if (event.key === "Enter") {
-            event.preventDefault();
-            if (!menu.hidden && active >= 0) chooseSuggestion(active);
-            else { hideSuggestions(); resolveLocation(); }
-          } else if (event.key === "Escape") hideSuggestions();
-        });
-        pin.addEventListener("click", async () => {
-          const match = locationMatch || await resolveLocation();
-          const initial = match && Number.isFinite(Number(match.lat)) && Number.isFinite(Number(match.lon))
-            ? { lat: Number(match.lat), lon: Number(match.lon) } : null;
-          const point = await pickLocationOnMap(initial, input.value.trim());
-          if (!point) return;
-          locationMatch = {
-            ...(match || {}), label: input.value.trim(), place: match?.place || input.value.trim(),
-            lat: point.lat, lon: point.lon, precision: "manual", source: "manual-pin",
-            components: match?.components || {},
-          };
-          matchesByLabel.set(input.value.trim(), locationMatch);
-          showResolution(locationMatch);
-        });
-        resolveLocationControl = resolveLocation;
-        getLocationMatch = () => locationMatch;
-        return { editor, input };
+      /** @type {any} */ let control = null;
+      /** @type {any} */ let locCtrl = null;
+      let manualMatch = null;
+      const hint = el("span", "field-hint location-resolution dim");
+      const showHint = (match) => {
+        hint.textContent = match
+          ? `\u25cf will map \u00b7 ${match.precision || "place"}`
+          : "\u25cb saved as typed \u00b7 resolved on apply when possible";
+        hint.hidden = false;
       };
 
       const rebuildControl = () => {
-        controlHost?.remove();
-        if (locationTimer) clearTimeout(locationTimer);
-        locationMatch = null;
-        if (field.value === "gender") {
-          control = el("select");
-          for (const [value, label] of [["", "Clear"], ["Female", "Female"], ["Male", "Male"]]) control.append(new Option(label, value));
-        } else if (field.value === "deceased") {
-          control = el("select"); control.append(new Option("Mark deceased", "yes"), new Option("Clear deceased status", ""));
-        } else if (field.value === "notes") {
-          control = el("textarea"); control.rows = 4; control.placeholder = "This text is appended to each selected contact's existing notes";
-        } else if (field.value === "location") {
-          const locationControl = buildLocationControl();
-          control = locationControl.input;
-          controlHost = locationControl.editor;
+        valueHost.innerHTML = "";
+        err.hidden = true;
+        manualMatch = null;
+        locCtrl = null;
+        const key = field.value;
+        if (key === "deceased") {
+          // Bulk needs the explicit pair, not a checkbox: "mark" vs "clear".
+          const sel = el("select", "field-value");
+          sel.append(new Option("Mark deceased", "yes"), new Option("Clear deceased status", ""));
+          control = { element: sel, read: () => sel.value, focus: () => sel.focus(), setInvalid: () => {} };
+          valueHost.append(sel);
+        } else if (key === "location") {
+          locCtrl = createLocationControl("", { onPick: (mt) => { manualMatch = null; showHint(mt); } });
+          control = locCtrl;
+          const pin = el("button", null, "Place pin on map\u2026");
+          pin.type = "button";
+          pin.title = "Pick the exact spot; the typed text stays as the label";
+          pin.addEventListener("click", async () => {
+            const text = locCtrl.read();
+            const base = (text && (locCtrl.match(text) ?? await resolveLocation(text))) || null;
+            const initial = base && Number.isFinite(Number(base.lat)) && Number.isFinite(Number(base.lon))
+              ? { lat: Number(base.lat), lon: Number(base.lon) } : null;
+            const point = await pickLocationOnMap(initial, text);
+            if (!point) return;
+            manualMatch = {
+              ...(base || {}), label: text, place: base?.place || text,
+              lat: point.lat, lon: point.lon, precision: "manual", source: "manual-pin",
+              components: base?.components || {},
+            };
+            showHint(manualMatch);
+          });
+          const meta = el("div", "bulk-field-meta");
+          meta.append(hint, pin);
+          showHint(null);
+          valueHost.append(locCtrl.element, meta);
         } else {
-          control = el("input"); control.type = "text";
-          control.placeholder = "Blank clears this field";
+          // The sidebar's own editor for this field: gender preset select,
+          // notes textarea, url inputs, company/role datalists.
+          control = createControl(key, "", null);
+          valueHost.append(control.element);
         }
-        if (!controlHost) controlHost = control;
-        valueRow.append(controlHost); control.focus();
+        control.focus();
       };
       field.addEventListener("change", rebuildControl);
-      m.body.append(fieldRow, valueRow, el("p", "dim field-hint", "Existing notes are preserved; other fields are replaced. Location resolution is shared across the selection."));
-      const cancel = el("button", null, "Cancel"); cancel.type = "button";
-      const apply = el("button", "primary", "Apply to selected"); apply.type = "button";
-      m.foot.append(cancel, apply);
-      cancel.addEventListener("click", () => m.close());
+
+      const cancel = el("button", null, "Cancel");
+      cancel.type = "button";
+      cancel.title = "Close without changing any of the selected contacts (Esc)";
+      cancel.addEventListener("click", () => { m.close(); });
+      const apply = el("button", "primary", "Apply to selected");
+      apply.type = "button";
+      apply.title = `Write this value to all ${this.selected.size} selected contacts`;
       apply.addEventListener("click", async () => {
-        const value = String(control?.value ?? "").trim();
-        if (field.value === "notes" && !value) return;
-        apply.disabled = true;
-        let resolvedLocation = null;
-        if (field.value === "location" && value) {
-          resolvedLocation = getLocationMatch() || await resolveLocationControl();
+        err.hidden = true;
+        const key = field.value;
+        const raw = String(control.read() ?? "");
+        // Same canonical form + validators as a sidebar edit.
+        const value = key === "notes" ? raw.trim() : normalizeFieldValue(key, raw);
+        if (key === "notes" && !value) return;
+        if (key !== "deceased" && value) {
+          const msg = validateField(fieldType(key), value);
+          if (msg) { err.textContent = msg; err.hidden = false; control.setInvalid(true); return; }
         }
-        settle({ field: field.value, value, locationMatch: resolvedLocation }); m.close();
+        apply.disabled = true;
+        let locationMatch = null;
+        if (key === "location" && value) {
+          locationMatch = manualMatch ?? locCtrl?.match?.(value) ?? await resolveLocation(value);
+        }
+        settle({ field: key, value, locationMatch });
+        m.close();
       });
+      m.foot.append(cancel, apply);
       rebuildControl();
     });
     if (!choice) return;
 
-    const locationMatch = choice.locationMatch || null;
     const done = await this.eachTarget(async (id) => {
       const contact = await api().contacts.get({ id });
       if (!contact) return;
@@ -1049,15 +1265,16 @@ export class ExploreView {
         fields.notes = fields.notes ? `${fields.notes.trimEnd()}\n${choice.value}` : choice.value;
       } else if (choice.field === "location") {
         if (choice.value) fields.location = choice.value; else delete fields.location;
-        if (locationMatch) {
-          fields.geo = `${locationMatch.lat},${locationMatch.lon}`;
-          fields.place = locationMatch.place || locationMatch.label;
-          fields.locationPrecision = locationMatch.precision || "place";
-          fields.locationSource = locationMatch.source || "photon";
-          const resolved = { v: 1, components: locationMatch.components || {}, osm: locationMatch.osm };
-          if (locationMatch.source === "manual-pin") resolved.manualPin = { lat: locationMatch.lat, lon: locationMatch.lon };
-          fields.locationResolved = JSON.stringify(resolved);
-        } else for (const key of ["geo", "place", "locationPrecision", "locationSource", "locationResolved"]) delete fields[key];
+        // Shared appliers, so the stored shape matches the card exactly; a
+        // manual pin additionally records its coordinates in the resolution.
+        if (choice.locationMatch) {
+          applyLocationMatch(fields, choice.locationMatch);
+          if (choice.locationMatch.source === "manual-pin") {
+            const resolved = JSON.parse(fields.locationResolved);
+            resolved.manualPin = { lat: choice.locationMatch.lat, lon: choice.locationMatch.lon };
+            fields.locationResolved = JSON.stringify(resolved);
+          }
+        } else clearLocationResolution(fields);
       } else if (choice.value) fields[choice.field] = choice.value;
       else delete fields[choice.field];
       await api().contacts.update({ id, patch: { fields } });

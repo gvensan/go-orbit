@@ -46,3 +46,17 @@ test("explore.fieldValues returns distinct company/role/tags", (t) => {
   assert.deepEqual(fv.company, ["Acme", "Globex"]);
   assert.deepEqual(fv.role, ["Designer", "PM"]);
 });
+
+test("normalizeFieldValue: one canonical form for card edits and imports", () => {
+  const { normalizeFieldValue, normalizeGender } = require("../src/shared/field-types");
+  assert.equal(normalizeFieldValue("email", "  a@b.co  "), "a@b.co", "text trims");
+  assert.equal(normalizeFieldValue("gender", "f"), "Female");
+  assert.equal(normalizeFieldValue("gender", "WOMAN"), "Female");
+  assert.equal(normalizeFieldValue("gender", "m"), "Male");
+  assert.equal(normalizeFieldValue("gender", "nonbinary"), "nonbinary", "unknown genders pass through");
+  assert.equal(normalizeFieldValue("deceased", "1"), "yes");
+  assert.equal(normalizeFieldValue("business", "TRUE"), "yes");
+  assert.equal(normalizeFieldValue("deceased", "no"), "", "non-affirmative clears a flag");
+  assert.equal(normalizeFieldValue("phone", ""), "", "empty clears");
+  assert.equal(normalizeGender("  female "), "Female");
+});

@@ -54,17 +54,25 @@ function setTags(db, contactId, tags) {
  * pre-import backup (guardrail: snapshot before every risky bulk write).
  *
  * @param {any} db
- * @param {{ name: string, fields?: Record<string,string>, tags?: string[], externalId?: number }[]} incoming
+ * @param {{ name: string, fields?: Record<string,string>, tags?: string[], externalId?: number,
+ *           decision?: { mode: "ignore"|"new"|"merge", targetId?: number } }[]} incoming
  * @param {{ onDuplicate: "skip" | "merge" | "keepBoth" }} opts
- * @returns {{ imported: number, merged: number, skipped: number,
+ * @returns {{ imported: number, merged: number, skipped: number, ignored: number,
  *             duplicatesFound: number, idMap: Map<number, number>,
  *             freshIds: Set<number> }}
  *          idMap: externalId -> local id (for archive edge remapping)
  */
 function importContacts(db, incoming, { onDuplicate }) {
+  // A business has no gender. The wizard already omits it for vendor rows, but
+  // source files (and archives) can carry both; strip it here so the stored
+  // contact keeps gender unset and no ring/tree logic ever sees one.
+  const isBiz = (f) => /^(yes|true|1)$/i.test(String(f?.business ?? ""));
+  for (const c of incoming) {
+    if (c.fields && isBiz(c.fields)) delete c.fields.gender;
+  }
   const index = buildIndex(db);
   const report = {
-    imported: 0, merged: 0, skipped: 0, duplicatesFound: 0,
+    imported: 0, merged: 0, skipped: 0, ignored: 0, duplicatesFound: 0,
     idMap: new Map(),
     freshIds: new Set(), // local ids of rows newly inserted (not merged/skipped)
   };
@@ -73,42 +81,60 @@ function importContacts(db, incoming, { onDuplicate }) {
     "INSERT INTO contacts (name, fields, created_at, updated_at) VALUES (?, ?, ?, ?)"
   );
 
+  // Merge incoming into an existing contact: existing values win, incoming fills
+  // the blanks (the same semantics as the "merge" policy, aimed at a chosen id).
+  const mergeInto = (targetId, contact) => {
+    const existing = contactsRepo.get(db, targetId);
+    if (!existing) return false;
+    const fields = { ...contact.fields, ...existing.fields };
+    // A merge can combine an existing gender with an incoming business flag
+    // (or vice versa); business wins and the gender goes.
+    if (isBiz(fields)) delete fields.gender;
+    db.prepare("UPDATE contacts SET fields = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(fields), now, targetId);
+    setTags(db, targetId, contact.tags);
+    upsertSearchRow(db, { id: targetId, name: existing.name, fields });
+    return true;
+  };
+  const insertFresh = (contact) => {
+    const info = insert.run(contact.name, JSON.stringify(contact.fields), now, now);
+    const id = Number(info.lastInsertRowid);
+    setTags(db, id, contact.tags);
+    upsertSearchRow(db, { id, name: contact.name, fields: contact.fields }, contact.tags.join(" "));
+    // New contacts join the dup index so in-file duplicates are caught too.
+    if (contact.fields.email) index.byEmail.set(normEmail(contact.fields.email), id);
+    if (normPhone(contact.fields.phone)) index.byPhone.set(normPhone(contact.fields.phone), id);
+    index.byNameOrg.set(`${normName(contact.name)}|${normName(contact.fields.company)}`, id);
+    report.imported++;
+    report.freshIds.add(id);
+    return id;
+  };
+
   const tx = db.transaction(() => {
     for (const item of incoming) {
       const contact = { name: item.name, fields: item.fields ?? {}, tags: item.tags ?? [] };
+      const setId = (id) => { if (item.externalId != null) report.idMap.set(item.externalId, id); };
+      const decision = item.decision; // per-record override from the wizard, if any
+
+      // An explicit per-record decision overrides the global policy: the user is
+      // the master of every record (ignore, force-new, or merge into a chosen id).
+      if (decision) {
+        if (decision.mode === "ignore") { report.ignored++; continue; } // no id -> no rel
+        if (decision.mode === "merge" && decision.targetId != null && mergeInto(decision.targetId, contact)) {
+          report.merged++; setId(decision.targetId); continue;
+        }
+        if (decision.mode === "new") { setId(insertFresh(contact)); continue; }
+        // merge with a vanished target falls through to insert as new below
+      }
+
       const dupId = findDuplicate(index, contact);
       if (dupId != null) report.duplicatesFound++;
 
-      if (dupId != null && onDuplicate === "skip") {
-        report.skipped++;
-        if (item.externalId != null) report.idMap.set(item.externalId, dupId);
-        continue;
+      if (dupId != null && onDuplicate === "skip") { report.skipped++; setId(dupId); continue; }
+      if (dupId != null && onDuplicate === "merge" && mergeInto(dupId, contact)) {
+        report.merged++; setId(dupId); continue;
       }
-
-      if (dupId != null && onDuplicate === "merge") {
-        // Existing values win; incoming fills the blanks.
-        const existing = contactsRepo.get(db, dupId);
-        const fields = { ...contact.fields, ...existing.fields };
-        db.prepare("UPDATE contacts SET fields = ?, updated_at = ? WHERE id = ?")
-          .run(JSON.stringify(fields), now, dupId);
-        setTags(db, dupId, contact.tags);
-        upsertSearchRow(db, { id: dupId, name: existing.name, fields });
-        report.merged++;
-        if (item.externalId != null) report.idMap.set(item.externalId, dupId);
-        continue;
-      }
-
-      const info = insert.run(contact.name, JSON.stringify(contact.fields), now, now);
-      const id = Number(info.lastInsertRowid);
-      setTags(db, id, contact.tags);
-      upsertSearchRow(db, { id, name: contact.name, fields: contact.fields }, contact.tags.join(" "));
-      // New contacts join the dup index so in-file duplicates are caught too.
-      if (contact.fields.email) index.byEmail.set(normEmail(contact.fields.email), id);
-      if (normPhone(contact.fields.phone)) index.byPhone.set(normPhone(contact.fields.phone), id);
-      index.byNameOrg.set(`${normName(contact.name)}|${normName(contact.fields.company)}`, id);
-      report.imported++;
-      report.freshIds.add(id);
-      if (item.externalId != null) report.idMap.set(item.externalId, id);
+      setId(insertFresh(contact));
     }
   });
   tx();
@@ -125,13 +151,14 @@ function importContacts(db, incoming, { onDuplicate }) {
  *
  * @param {any} db
  * @param {{ name: string, fields?: Record<string,string>, tags?: string[],
+ *           decision?: { mode: "ignore"|"new"|"merge", targetId?: number },
  *           rel?: { type: string, role?: string, recip?: string|null, existingId?: number, batchIndex?: number } }[]} records
  * @param {{ onDuplicate: "skip" | "merge" | "keepBoth" }} opts
  */
 function importRecords(db, records, opts) {
   const { onDuplicate } = opts;
   const incoming = records.map((r, i) => ({
-    name: r.name, fields: r.fields ?? {}, tags: r.tags ?? [], externalId: i,
+    name: r.name, fields: r.fields ?? {}, tags: r.tags ?? [], externalId: i, decision: r.decision,
   }));
   const report = importContacts(db, incoming, { onDuplicate }); // report.idMap: index -> local id
 

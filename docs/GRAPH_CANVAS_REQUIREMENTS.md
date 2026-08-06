@@ -37,7 +37,8 @@ Do not re-decide these; the renderer plugs into them:
 
 **Renderer: sigma.js v3 (WebGL) over graphology.** This is the decisive choice and it follows from scale. SVG and Canvas-2D (e.g. Cytoscape.js) are smooth to a few thousand nodes and stutter well before 20k; the SVG/d3-force demo built earlier is a throwaway prototype, not the production path. sigma.js renders in WebGL, targets tens of thousands of nodes, and pairs natively with graphology — which the app already uses as its model — so there is no second graph representation to keep in sync.
 
-- **Layout:** ForceAtlas2 via `graphology-layout-forceatlas2`, run in a **worker** (its supervisor mode streams positions). Layout never runs on the render or main thread. Progressive: stream positions as they settle, then freeze.
+- **Layout:** the ego view is a **deterministic radial tree** (`balloonLayout` in `graph-geometry.mjs`): you at the centre, rings by how many steps away a contact is, one wedge per tie type, unreachable contacts on an outer ring. Synchronous placement, permitted under the worker-only guardrail because it is not a force simulation and the ego view is capped at 1200 contacts. Same network, same picture, every launch - there is no second engine and no toggle. A ring is a **lane** two seats deep so it holds twice the circumference and sits half as far out; each branch reserves the arc its whole subtree needs; a crowded wedge widens its own ring and the ones outside it, bounded against what the ring needs to seat its contacts. **Couples are one unit:** contracted to a single node carrying both partners' ties (`contractCouples`), split apart afterwards across the ring (`expandCouples`), the side chosen by which partner each neighbour actually knows (`partnerSides`) so a partner's lines never reach across their partner's. Their gap is a share of their painted size (`COUPLE_SPREAD`), floored at what `pairHeartSpots` needs, because a gap fixed in graph units closes up at fit-to-window. **A layout is told the radius the canvas paints** (`layoutSize` -> `nodeHaloRadius`), never the bare body. In the **relationship** colour mode a contact and every line inside their branch carry the colour of the first step from you (`tagGateways`), so a friend's family reads as part of your friend's world.
+  - ForceAtlas2 and its worker were removed on 2026-08-06: measured against this layout on a real 97-contact network they drew 24 crossings to 0 and left 54 pairs overlapping on screen to 2, because that network is a tree and a force layout has no cluster structure to find in one. Circle packing was prototyped as a replacement and was worse again. See `docs/DECISIONS.md`.
 - **Level of detail:** cull off-viewport nodes/edges; render labels only above a zoom threshold or for high-degree nodes, to avoid a label storm at full scale.
 - **High-DPI:** sigma handles `devicePixelRatio`; any custom canvas must scale its backing store by `dpr` or it renders blurry on Retina/4K.
 - **Incremental updates:** adding or removing a contact mutates the graphology instance and updates sigma in place — preserve existing positions and lay out only the new node locally. No full relayout, no visual jump.
@@ -50,8 +51,8 @@ Do not re-decide these; the renderer plugs into them:
 
 The renderer builds its graphology instance from IPC-delivered `nodes`/`links` matching the SQLite shape:
 
-- **Node:** `{ id, name, org, role, degree, x?, y? }` — `degree` drives size, `org`/community drives color, `x/y` from cached or worker-computed layout.
-- **Edge:** `{ source, target, type, directed }` — `type` drives color and legend.
+- **Node:** `{ id, name, org, role, degree, x?, y? }` — `degree` drives size, `org`/community/dominant relationship drives color, `x/y` from cached or worker-computed layout.
+- **Edge:** `{ source, target, type, directed }` — `type` drives color and legend. The canonical type list lives in `src/shared/relationships.js` (colleague, friend, acquaintance, family, introduced, vendor); `vendor` marks a business: the contact carries `business: true` (set explicitly, or derived in the snapshot when every tie is a business type and the contact is neither the owner nor gendered), stores no gender (import, merge, and the card all strip it), and draws a vendor-hued ring (same geometry as the gender ring) plus an organization glyph instead of a gender ring. The "Fade links" toggle dims edges in every view, including cluster meta-edges and the tree's overlay connectors.
 
 Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist computed layout positions so reopening the app doesn't recompute from scratch.
 
@@ -67,7 +68,7 @@ Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist comput
 | Node drag | Reposition a node; persist the position in full-network view |
 | Node size = centrality | Degree-scaled radius so hubs are visible |
 | Typed edges + legend | Edge color by relationship type; readable legend |
-| Node color by group | Org / cluster color encoding |
+| Node color by group | Org / cluster / relationship color encoding (switch from the palette: "Color by organization", "Color by community", "Color by relationship" (default - fills match the legend)). The choice persists across launches (`orbit-color-mode`). The gender ring and the deceased half-disc sit on top of whichever fill is active. |
 | Hover | Highlight node, show label + lightweight tooltip |
 | Click-to-focus ego-network | Select a node → highlight it + neighbors, dim the rest, side panel of connections |
 | High-DPI correctness | Crisp on Retina/4K; backing store scaled by devicePixelRatio |
@@ -81,7 +82,7 @@ Soft-deleted contacts (`deleted_at`) are excluded from hydration. Persist comput
 | Degrees of separation | Hop distance between any two contacts |
 | Centrality metrics | Degree (live) and betweenness (worker, on-demand, cached) |
 | Ego-network depth N | Expand a focus to N hops interactively |
-| Community detection | Louvain clustering with cluster coloring and optional cluster layout |
+| Community detection | **Hybrid clustering:** every company (org field) recorded on any contact becomes its own cluster with all of its people (regardless of count or relationship type), so any company you've noted always appears. A business contact (vendor) with no org field is a company in its own right: it becomes its own org-kind bubble named by the contact (or joins the company cluster already carrying its name) and never dissolves into a personal Louvain community. Contacts with no company group by Louvain connectivity communities. **Connector people are drawn as their own node, not folded into a bubble:** a company-to-company line is meaningless (companies don't have relationships, people do), so the owner ("you", your network's hub) and any genuine peer bridge (a person who links two clusters without routing through you) are pulled out as a person node, wired to their home cluster and to whoever they actually know. Every remaining line is therefore person→cluster or person→person, never org→org. A company is never emptied by promotion (a bridge is only pulled from a cluster that keeps ≥1 member behind). Keeping the owner as a person node also keeps the person-only view (organizations hidden) connected instead of collapsing into dangling islands. Each cluster bubble carries a person/organization badge glyph. Meta-edges are uniform thickness (tie count doesn't vary line width, so lines don't balloon on zoom). No cluster is left dangling: a bubble with no cross ties is anchored to the owner (else the highest-degree node). Because companies now connect only through people, the **organization-only view** (people hidden via the legend) would otherwise strand every company; a hidden "org bridge" link, shown only while people are hidden, wires each company to your own company (else the largest) so that view stays a connected star. The Cluster view adds a center-bottom person/organization legend; clicking a kind hides/shows those nodes. |
 | Filtering / facets | By edge type, tag, org, degree threshold — mirrors search operators |
 | Search ↔ graph integration | Search result focuses its ego-network; graph selection can seed a search; matches highlighted |
 | Responsive reflow | On resize keep node sizes constant and expand/refit bounds — never uniform-scale zoom |
@@ -169,7 +170,7 @@ Each must pass as an automated or scripted test:
 
 - **Phase 0 — Renderer foundation.** Swap the prototype for sigma.js + graphology hydrated from SQLite via IPC; pan/zoom/fit; node size = degree; typed edge colors + legend; org color.
 - **Phase 1 — Core interactions.** Hover, drag, click-to-focus ego-network + side panel; LOD labels; viewport culling; high-DPI correctness.
-- **Phase 2 — Layout engine.** ForceAtlas2 in a worker, progressive settle + freeze, persisted positions, incremental in-place updates.
+- **Phase 2 — Layout engine.** Deterministic radial-tree placement for the ego view, persisted positions, incremental in-place updates. (Shipped as ForceAtlas2 in a worker; replaced 2026-08-06, see §5.)
 - **Phase 3 — Analytics.** Shortest path, degrees of separation, degree + (worker/cached) betweenness centrality, ego depth N, filters/facets.
 - **Phase 4 — Clustering & search link.** Louvain community detection with cluster coloring/layout; search ↔ graph focus integration and match highlighting.
 - **Phase 5 — Polish & verify.** Responsive reflow, minimap, export (PNG/SVG/GraphML); acceptance-test suite (§12) plus a perf harness on the 20k fixture in CI.

@@ -107,6 +107,12 @@ const api = {
     merge: invoke("dedup:merge"),
     undo: invoke("dedup:undo"),
   },
+  health: {
+    scan: invoke("health:scan"),
+    last: invoke("health:last"),
+    setStatus: invoke("health:setStatus"),
+    fix: invoke("health:fix"),
+  },
   dialogs: {
     openFile: invoke("dialog:openFile"),
     saveFile: invoke("dialog:saveFile"),
@@ -147,6 +153,8 @@ const api = {
     importFile: invoke("import:file"),
     importParse: invoke("import:parse"),
     importRecords: invoke("import:records"),
+    importMatch: invoke("import:match"),
+    importWriteResults: invoke("import:writeResults"),
     seedSample: invoke("data:seedSample"),
     sampleStatus: invoke("data:sampleStatus"),
   },

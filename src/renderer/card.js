@@ -5,18 +5,21 @@
 // immediately. Delete is undo-first.
 
 import { CITIES, CITY_COORDS } from "../shared/cities.js";
-import { COUNTRIES, flagEmoji, parsePhone, dialOf, groupNational } from "../shared/countries.js";
-import { AUTOCOMPLETE_FIELDS, PRESET_VALUES, fieldType, validateField } from "../shared/field-types.js";
+import { PRESET_VALUES, fieldType, validateField, normalizeFieldValue } from "../shared/field-types.js";
+import { BUSINESS_TYPES } from "../shared/relationships.js";
 import { EDGE_COLORS, EDGE_TYPES, initials, kinPreview, kinRolesFor, orgColor, reciprocalRole } from "./colors.js";
 import { confirmModal, el } from "./modal.js";
 import { pickLocationOnMap } from "./location-picker.js";
+import { createControl, applyLocationMatch, clearLocationResolution } from "./field-controls.js";
 import { toast, toastError } from "./toast.js";
 
 // gender leads the details: it's the first thing worth setting (it drives the
 // kinship options), then the rest.
 const KNOWN_FIELDS = ["gender", "location", "email", "phone", "company", "role", "notes"];
 // Standard fields offered as quick-pick chips under "+ Add field" (expandable).
-const STANDARD_FIELDS = ["deceased", "birthday", "nickname", "address", "website", "linkedin"];
+const STANDARD_FIELDS = ["deceased", "business", "birthday", "nickname", "address", "website", "linkedin"];
+/** A vendor/shop/service rather than a person: no gender, no kinship. */
+const isBusiness = (contact) => /^(yes|true|1)$/i.test(String(contact?.fields?.business ?? ""));
 const fmtDate = (ts) =>
   new Date(ts).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
@@ -28,117 +31,9 @@ const iconBtn = (glyph, cls, title) => {
   return b;
 };
 
-// A value control matched to the field key: email/date/url native inputs,
-// company/role/gender datalists, notes a textarea, phone a country + number
-// widget. Module-level so both inline editors and add-field use it.
-function createControl(key, value, fieldValues) {
-  const type = fieldType(key);
-  if (type === "bool") {
-    const cb = /** @type {HTMLInputElement} */ (el("input", "field-check"));
-    cb.type = "checkbox";
-    cb.checked = /^(yes|true|1)$/i.test(value ?? "");
-    return {
-      element: cb,
-      isBool: true,
-      read: () => (cb.checked ? "yes" : ""),
-      focus: () => cb.focus(),
-      setInvalid: () => {},
-      onBlur: (fn) => cb.addEventListener("change", fn),
-    };
-  }
-  if (type === "tel") return createPhoneControl(value);
-  const lc = String(key).trim().toLowerCase();
-  if (lc === "gender") {
-    // Gender is a standard field with a fixed option set (blank clears it).
-    const sel = el("select", "field-value");
-    sel.append(new Option("—", ""));
-    for (const g of PRESET_VALUES.gender ?? ["Female", "Male"]) sel.append(new Option(g, g));
-    if (value && !(PRESET_VALUES.gender ?? []).includes(value)) sel.append(new Option(value, value));
-    sel.value = value ?? "";
-    return {
-      element: sel,
-      isSelect: true, // a picked option commits immediately - no ✓ needed
-      read: () => sel.value,
-      focus: () => sel.focus(),
-      setInvalid: () => {},
-      onBlur: (fn) => sel.addEventListener("change", fn),
-    };
-  }
-  if (lc === "notes") {
-    const ta = el("textarea", "field-value");
-    ta.rows = 3;
-    ta.value = value ?? "";
-    return {
-      element: ta, multiline: true,
-      read: () => ta.value.trim(),
-      focus: () => ta.focus(),
-      setInvalid: (b) => ta.classList.toggle("invalid", b),
-      onBlur: (fn) => ta.addEventListener("blur", fn),
-    };
-  }
-  const input = el("input", "field-value");
-  input.type = { email: "email", date: "date", url: "url", text: "text" }[type] ?? "text";
-  input.value = value ?? "";
-  if (AUTOCOMPLETE_FIELDS.includes(lc)) input.setAttribute("list", `dl-${lc}`);
-  return {
-    element: input,
-    read: () => input.value.trim(),
-    focus: () => input.focus(),
-    setInvalid: (b) => input.classList.toggle("invalid", b),
-    onBlur: (fn) => input.addEventListener("blur", fn),
-  };
-}
-
-function createPhoneControl(value) {
-  const parsed = parsePhone(value);
-  const wrap = el("div", "phone-input");
-  // Country selector: option labels are full country names so you can search
-  // by typing the name ("united k…" jumps to United Kingdom).
-  const sel = el("select", "phone-country");
-  for (const c of COUNTRIES) sel.append(new Option(`${flagEmoji(c.iso2)} ${c.name} (+${c.dial})`, c.iso2));
-  sel.value = parsed ? parsed.country.iso2 : localStorage.getItem("orbit-phone-country") || "US";
-
-  // Number split into area code + local number. For NANP (+1) the area code
-  // is the first 3 national digits; elsewhere the split is left to the user.
-  const area = el("input", "phone-area");
-  area.type = "tel";
-  area.placeholder = "area";
-  area.setAttribute("aria-label", "Area code");
-  const num = el("input", "phone-number");
-  num.type = "tel";
-  num.placeholder = "number";
-  num.setAttribute("aria-label", "Phone number");
-  if (parsed) {
-    if (parsed.country.dial === "1" && parsed.national.length >= 7) {
-      area.value = parsed.national.slice(0, 3);
-      num.value = parsed.national.slice(3);
-    } else {
-      num.value = parsed.national;
-    }
-  } else if (value && !value.startsWith("+")) {
-    num.value = value.replace(/[^\d]/g, "");
-  }
-
-  wrap.append(sel, area, num);
-  sel.addEventListener("change", () => localStorage.setItem("orbit-phone-country", sel.value));
-  return {
-    element: wrap,
-    // Standardized "+<dial> <grouped national>", e.g. "+91 98807 49181".
-    read: () => {
-      const a = area.value.replace(/[^\d]/g, "");
-      const n = num.value.replace(/[^\d]/g, "");
-      const nat = a + n;
-      return nat ? `+${dialOf(sel.value)} ${groupNational(sel.value, nat)}` : "";
-    },
-    focus: () => num.focus(),
-    setInvalid: (b) => num.classList.toggle("invalid", b),
-    onBlur: (fn) => {
-      num.addEventListener("blur", fn);
-      area.addEventListener("blur", fn);
-      sel.addEventListener("change", fn);
-    },
-  };
-}
+// The value controls (email/date/url inputs, datalists, notes textarea, the
+// phone country widget) live in field-controls.js, shared with Explore's
+// inline cell editor so the two write identical shapes.
 
 export class ContactCard {
   /**
@@ -199,9 +94,16 @@ export class ContactCard {
   }
 
   async saveField(key, value) {
+    // Same canonical form the import pipeline writes (trim, "f" -> "Female",
+    // truthy flags -> "yes"), so hand-typed and imported values never drift.
+    value = normalizeFieldValue(key, value);
     const fields = { ...this.contact.fields };
     if (value) fields[key] = value;
     else delete fields[key];
+    // A business has no gender. Turning the flag on also drops any gender left
+    // from when this contact was a person - otherwise the card stops showing it
+    // while Explore, the gender legend and exports still count it.
+    if (key === "business" && value) delete fields.gender;
     try {
       await window.api.contacts.update({ id: this.contact.id, patch: { fields } });
       this.notifyChanged();
@@ -273,6 +175,9 @@ export class ContactCard {
     const recencyBits = [lastAt ? `last touch ${Math.floor((Date.now() - lastAt) / 86400000)}d ago` : "no interactions yet"];
     if (contact.cadenceDays && (!lastAt || Date.now() - lastAt > contact.cadenceDays * 86400000)) recencyBits.push("overdue");
     const recency = el("p", "card-sub mono", recencyBits.join(" · "));
+    recency.title = recencyBits.includes("overdue")
+      ? `It has been longer than the keep-in-touch cadence of ${contact.cadenceDays} days since the last logged interaction`
+      : "Time since the last interaction logged in the timeline below";
     if (recencyBits.includes("overdue")) recency.classList.add("overdue");
     idBlock.append(recency);
 
@@ -294,19 +199,24 @@ export class ContactCard {
 
     // --- actions (no more separate Edit mode) ---
     const actions = el("div", "card-actions");
-    const mkBtn = (label, cls, fn) => {
+    const mkBtn = (label, cls, fn, title) => {
       const b = el("button", cls, label);
       b.type = "button";
+      if (title) b.title = title;
       b.addEventListener("click", fn);
       actions.append(b);
     };
     mkBtn(this.depth === 1 ? "2 hops" : "1 hop", null, () => {
       this.depth = this.depth === 1 ? 2 : 1;
       this.handlers.onDepthChange(this.depth);
-    });
-    mkBtn("Link…", null, () => this.handlers.onAddRelationship(contact));
+    }, this.depth === 1
+      ? `Widen the graph to everyone within two steps of ${contact.name}`
+      : `Narrow the graph back to ${contact.name}'s direct connections`);
+    mkBtn("Link…", null, () => this.handlers.onAddRelationship(contact),
+      `Connect ${contact.name} to a contact you already have`);
     mkBtn("Add connection ▾", null, (e) =>
-      this.handlers.onAddConnection(contact, /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect()));
+      this.handlers.onAddConnection(contact, /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect()),
+      `Create a brand new contact already connected to ${contact.name}`);
     // Delete as a trash icon (same glyph as the per-connection delete).
     const delBtn = el("button", "card-del");
     delBtn.type = "button";
@@ -329,18 +239,51 @@ export class ContactCard {
     p = body;
 
     // --- gender first: the first field worth setting (it drives the kinship
-    // options below), so it sits at the very top and commits on selection. ---
-    const genderRow = el("div", "form-row");
-    genderRow.append(el("label", null, "Gender"));
-    const gsel = el("select");
-    gsel.append(new Option("—", ""));
-    for (const g of (PRESET_VALUES.gender ?? ["Female", "Male"])) gsel.append(new Option(g, g));
-    const gv = contact.fields.gender ?? "";
-    if (gv && !(PRESET_VALUES.gender ?? []).includes(gv)) gsel.append(new Option(gv, gv));
-    gsel.value = gv;
-    gsel.addEventListener("change", () => this.saveField("gender", gsel.value));
-    genderRow.append(gsel);
-    p.append(genderRow);
+    // options below), so it sits at the very top and commits on selection.
+    // A business has no gender, so the row is replaced by the business marker. ---
+    // Flagged explicitly, or derived: a contact whose every tie is a business
+    // type (vendor) IS a business - never ask it for a gender.
+    const flagged = isBusiness(contact);
+    const cardEdges = this.context?.edges ?? [];
+    // Mirrors the snapshot rule: vendor-only ties make a business, but a
+    // recorded gender (or being the owner) keeps a contact a person.
+    const derived = !flagged && !contact.fields.gender && !contact.isOwner
+      && cardEdges.length > 0 && cardEdges.every((e) => BUSINESS_TYPES.has(e.type));
+    const business = flagged || derived;
+    if (business) {
+      const bizRow = el("div", "form-row");
+      bizRow.append(el("label", null, "Kind"));
+      const bwrap = el("div", "biz-kind");
+      const bizTag = el("span", "biz-tag mono", "business");
+      bizTag.title = "Treated as a vendor or shop, not a person: no gender ring and no kinship";
+      bwrap.append(bizTag);
+      if (flagged) {
+        const undo = el("button", "biz-undo", "Not a business");
+        undo.type = "button";
+        undo.title = "Treat this contact as a person again";
+        undo.addEventListener("click", () => this.saveField("business", ""));
+        bwrap.append(undo);
+      } else {
+        const hint = el("span", "field-hint dim mono", "all ties are vendor");
+        hint.title = "Change a connection's type to treat this contact as a person";
+        bwrap.append(hint);
+      }
+      bizRow.append(bwrap);
+      p.append(bizRow);
+    } else {
+      const genderRow = el("div", "form-row");
+      genderRow.append(el("label", null, "Gender"));
+      const gsel = el("select");
+      gsel.title = "Sets the ring colour on the graph and the kinship terms offered below. Saves as soon as you pick";
+      gsel.append(new Option("—", ""));
+      for (const g of (PRESET_VALUES.gender ?? ["Female", "Male"])) gsel.append(new Option(g, g));
+      const gv = contact.fields.gender ?? "";
+      if (gv && !(PRESET_VALUES.gender ?? []).includes(gv)) gsel.append(new Option(gv, gv));
+      gsel.value = gv;
+      gsel.addEventListener("change", () => this.saveField("gender", gsel.value));
+      genderRow.append(gsel);
+      p.append(genderRow);
+    }
 
     // --- relationship editor (breadcrumb): editable when you arrived here
     // from another contact. Relationships are pairwise, so this edits the edge
@@ -355,6 +298,7 @@ export class ContactCard {
       const relRow = el("div", "form-row rel-row");
       relRow.append(el("label", null, `Relationship to ${relFrom.name}`));
       const sel = el("select");
+      sel.title = `How ${contact.name} and ${relFrom.name} are connected. This sets the link's colour on the graph`;
       for (const t of EDGE_TYPES) {
         const opt = new Option(t, t);
         opt.style.color = EDGE_COLORS[t] ?? "";
@@ -398,6 +342,7 @@ export class ContactCard {
         const kinRow = el("div", "form-row rel-row");
         kinRow.append(el("label", null, `${firstName(contact.name)} is ${firstName(relFrom.name)}'s…`));
         const kinSel = el("select");
+        kinSel.title = "The exact family role. Choosing one also records the matching role in the other direction, so both cards read correctly";
         kinSel.append(new Option("(unspecified)", ""));
         for (const r of roles) kinSel.append(new Option(r, r));
         if (curRole && !roles.includes(curRole)) kinSel.append(new Option(curRole, curRole));
@@ -448,6 +393,7 @@ export class ContactCard {
     const locInput = /** @type {HTMLInputElement} */ (el("input"));
     locInput.type = "text";
     locInput.placeholder = "City, neighborhood, or full address";
+    locInput.title = "Type a place and pick a suggestion to put this contact on the map. Your text is kept exactly as entered either way";
     locInput.autocomplete = "off";
     locInput.setAttribute("role", "combobox");
     locInput.setAttribute("aria-autocomplete", "list");
@@ -482,13 +428,7 @@ export class ContactCard {
     };
     showResolution(contact.fields);
 
-    const applyMatch = (fields, match) => {
-      fields.geo = `${match.lat},${match.lon}`;
-      fields.place = match.place || match.label;
-      fields.locationPrecision = match.precision || "place";
-      fields.locationSource = match.source || "photon";
-      fields.locationResolved = JSON.stringify({ v: 1, components: match.components || {}, osm: match.osm });
-    };
+    const applyMatch = applyLocationMatch; // shared with Explore's inline editor
     const hideSuggestions = () => {
       locMenu.hidden = true;
       locInput.setAttribute("aria-expanded", "false");
@@ -504,6 +444,7 @@ export class ContactCard {
         option.type = "button";
         option.id = `${locMenu.id}-${index}`;
         option.setAttribute("role", "option");
+        option.title = `Map to ${match.label} at ${match.precision || "place"} level`;
         const text = el("span", "location-suggestion-label", match.label);
         const kind = el("span", "location-suggestion-kind", match.precision || "place");
         option.append(text, kind);
@@ -553,7 +494,7 @@ export class ContactCard {
         }
       }
       if (match) applyMatch(fields, match);
-      else for (const key of ["geo", "place", "locationPrecision", "locationSource", "locationResolved"]) delete fields[key];
+      else clearLocationResolution(fields);
       try {
         await window.api.contacts.update({ id: contact.id, patch: { fields } });
         contact.fields = fields;
@@ -628,6 +569,9 @@ export class ContactCard {
     if (contact.fields.location) {
       const pinBtn = el("button", "location-pin-btn", contact.fields.geo ? "Adjust pin on map" : "Place pin on map");
       pinBtn.type = "button";
+      pinBtn.title = contact.fields.geo
+        ? "Drag the pin to the exact spot. The location text above stays as you wrote it"
+        : "Pick the exact spot on the map. The location text above stays as you wrote it";
       pinBtn.addEventListener("click", async () => {
         let initial = null;
         if (contact.fields.geo) {
@@ -659,6 +603,7 @@ export class ContactCard {
     const cadenceRow = el("div", "form-row");
     cadenceRow.append(el("label", null, "Keep in touch"));
     const cadence = el("select");
+    cadence.title = "How often you mean to be in touch. Going longer than this marks the contact overdue in Insights and on the graph";
     for (const [days, label] of /** @type {[number, string][]} */ ([
       [0, "no reminder"], [30, "monthly"], [90, "quarterly"], [180, "twice a year"], [365, "yearly"],
     ])) cadence.append(new Option(label, String(days)));
@@ -676,13 +621,17 @@ export class ContactCard {
     const sec = el("div", "card-section");
     const dHead = el("div", "section-head");
     dHead.append(el("h3", null, "Details"));
-    const addBtn = iconBtn("+", "inline-add-btn", "Add field");
+    const addBtn = iconBtn("+", "inline-add-btn", "Add a field: pick a standard one or type your own name");
     addBtn.addEventListener("click", () => this.addFieldInline(sec, addBtn));
     dHead.append(addBtn);
     sec.append(dHead);
     // Gender + Location have their own rows above, so Details holds the rest.
     const skip = (k) => k === "notes" || k === "gender" || k === "location" || k === "geo" || k === "place"
       || k === "locationPrecision" || k === "locationSource" || k === "locationResolved";
+    // Details lists only fields that HAVE values (a sparse contact stays a
+    // short card); the FULL supported catalog - core channels and the
+    // standard extras alike - is one click away as quick-pick chips under
+    // "+ Add field" (see addFieldInline), so nothing is undiscoverable.
     const shownKeys = [
       ...KNOWN_FIELDS.filter((k) => !skip(k) && contact.fields[k]),
       ...Object.keys(contact.fields).filter((k) => !skip(k) && !KNOWN_FIELDS.includes(k)),
@@ -701,10 +650,11 @@ export class ContactCard {
     const tagSec = el("div", "card-section");
     const tHead = el("div", "section-head");
     tHead.append(el("h3", null, "Tags"));
-    const tagEdit = iconBtn("✎", "inline-edit-btn", "Edit tags");
+    const tagEdit = iconBtn("✎", "inline-edit-btn", "Edit tags. Tags are searchable and filterable in Explore");
     tHead.append(tagEdit);
     tagSec.append(tHead);
     const tagView = el("div", "tag-view");
+    tagView.title = "Click to edit. Tags are searchable and filterable in Explore";
     if (tags.length) for (const t of tags) tagView.append(el("span", "tag-chip", t));
     else tagView.append(el("span", "dim empty-hint", "No tags"));
     tagSec.append(tagView);
@@ -718,6 +668,9 @@ export class ContactCard {
     const cHead = el("div", "section-head collapsible");
     cHead.append(el("h3", null, `Connections · ${neighbors.length}`));
     const chevron = el("span", "collapse-chevron mono", this.connExpanded ? "▾ hide" : "▸ show");
+    cHead.title = this.connExpanded
+      ? "Hide the connection list. Hovering a row highlights that person on the graph"
+      : "Show who this contact is connected to";
     cHead.append(chevron);
     cHead.addEventListener("click", () => { this.connExpanded = !this.connExpanded; this.render(); });
     conn.append(cHead);
@@ -742,7 +695,9 @@ export class ContactCard {
           if (kinRole) lbl.title = `family · ${kinRole}`;
           open.append(lbl);
         }
-        open.append(el("span", "conn-degree mono", `${n.degree}°`));
+        const deg = el("span", "conn-degree mono", `${n.degree}°`);
+        deg.title = `${n.name} has ${n.degree} connection${n.degree === 1 ? "" : "s"}`;
+        open.append(deg);
         row.append(open);
         if (edge) {
           const remove = el("button", "conn-delete");
@@ -793,12 +748,15 @@ export class ContactCard {
     timeline.append(el("h3", null, "Timeline"));
     const logRow = el("div", "form-row");
     const kind = el("select");
+    kind.title = "What kind of interaction this was";
     for (const k of ["note", "call", "email", "meeting"]) kind.append(new Option(k, k));
     const note = el("input");
     note.type = "text";
     note.placeholder = "Log an interaction…";
+    note.title = "Optional note. Press Enter to log it, dated today";
     const logBtn = el("button", null, "Log");
     logBtn.type = "button";
+    logBtn.title = `Record an interaction with ${contact.name} today. This resets their keep-in-touch clock`;
     const submitLog = async () => {
       try {
         await window.api.interactions.add({
@@ -865,6 +823,7 @@ export class ContactCard {
     if (fieldType(key) === "bool") {
       const row = el("div", "field-row bool-row");
       const label = el("label", "bool-field");
+      label.title = `Turn ${key} on or off. Clearing it removes the field entirely`;
       const cb = /** @type {HTMLInputElement} */ (el("input", "field-check"));
       cb.type = "checkbox";
       cb.checked = /^(yes|true|1)$/i.test(value ?? "");
@@ -919,6 +878,7 @@ export class ContactCard {
     const row = el("div", "field-row editing");
     const keyInput = el("input", "edit-key");
     keyInput.placeholder = "field name";
+    keyInput.title = "Pick a standard field below, or type any name of your own";
     const state = { ctrl: createControl("", "", this.fieldValues) };
     const controls = this.inlineControls(
       async () => {
@@ -946,12 +906,17 @@ export class ContactCard {
     state.ctrl.element.addEventListener("keydown", onKey);
     keyInput.addEventListener("input", rebuildControl);
 
-    // Quick-pick standard fields (expandable) - click to prefill the name.
+    // Quick-pick chips: the FULL supported catalog (core channels + standard
+    // extras), minus whatever this contact already has - so every field the
+    // app supports is reachable from here even though Details lists only set
+    // ones. Free-typing a custom name still works.
     const presets = el("div", "field-presets mono");
     presets.append(el("span", "dim", "standard:"));
-    for (const key of STANDARD_FIELDS.filter((k) => !this.contact.fields[k])) {
+    const SUPPORTED = [...KNOWN_FIELDS.filter((k) => !["gender", "location", "notes"].includes(k)), ...STANDARD_FIELDS];
+    for (const key of SUPPORTED.filter((k) => !this.contact.fields[k])) {
       const chip = el("button", "preset-chip", key);
       chip.type = "button";
+      chip.title = `Add a ${key} field`;
       chip.addEventListener("mousedown", (e) => e.preventDefault()); // don't blur/commit
       chip.addEventListener("click", () => {
         keyInput.value = key;
@@ -977,6 +942,7 @@ export class ContactCard {
     const notes = this.contact.fields.notes || "";
     const renderText = () => {
       const view = el("p", "dim editable-text notes-view", notes || "Click to add notes…");
+      view.title = "Click to edit. Notes are searchable and saved when you click away";
       view.addEventListener("click", () => {
         view.replaceWith(editorEl());
       });
@@ -1006,6 +972,7 @@ export class ContactCard {
     const input = el("input");
     input.type = "text";
     input.placeholder = "add tag + Enter";
+    input.title = "Type a tag and press Enter. Click away to save the whole set";
     input.setAttribute("list", "dl-alltags");
     const renderChips = () => {
       box.querySelectorAll(".chip").forEach((c) => c.remove());

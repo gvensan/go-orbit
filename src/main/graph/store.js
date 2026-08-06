@@ -8,6 +8,7 @@ const Graph = /** @type {typeof import("graphology").default} */ (
 );
 const { bidirectional } = require("graphology-shortest-path");
 const { AppError } = require("../ipc/errors");
+const { BUSINESS_TYPES, isBusinessContact } = require("../../shared/relationships");
 
 const edgeKey = (s, t, type) => `${s}|${t}|${type}`;
 
@@ -44,7 +45,7 @@ class GraphStore {
     for (const c of contacts) {
       const f = c.fields ? JSON.parse(c.fields) : {};
       this.graph.addNode(c.id, {
-        name: c.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!c.starred,
+        name: c.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, business: !!f.business, starred: !!c.starred,
       });
     }
     // Tag the owner ("you") node so the renderer can mark it and centre Home on it.
@@ -76,7 +77,7 @@ class GraphStore {
     if (this.graph.hasNode(contact.id)) return;
     const f = contact.fields || {};
     this.graph.addNode(contact.id, {
-      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
+      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, business: !!f.business, starred: !!contact.starred,
     });
   }
 
@@ -84,7 +85,7 @@ class GraphStore {
     if (!this.graph.hasNode(contact.id)) return;
     const f = contact.fields || {};
     this.graph.mergeNodeAttributes(contact.id, {
-      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, starred: !!contact.starred,
+      name: contact.name, org: f.company, role: f.role, gender: f.gender, location: f.location, place: f.place, ...localityOf(f), geo: f.geo, locationPrecision: f.locationPrecision, locationSource: f.locationSource, deceased: !!f.deceased, business: !!f.business, starred: !!contact.starred,
     });
   }
 
@@ -124,6 +125,24 @@ class GraphStore {
         if (r.c != null) cadence.set(r.id, r.c);
       }
     }
+    // A vendor is a business even when the contact was created before the
+    // business flag existed (or the flag was never set): a contact whose ties
+    // are ALL business-typed is treated as one. A vendor edge is undirected, so
+    // both endpoints look alike; the tiebreakers are that the owner is always a
+    // person and a recorded gender means person (a business never has one - the
+    // import/merge paths enforce that). Derived here (the one place every
+    // consumer reads from) so the ring, card and tree agree.
+    const businessTie = new Set();
+    const personalTie = new Set();
+    this.graph.forEachEdge((_k, eAttrs, s, t) => {
+      const bucket = BUSINESS_TYPES.has(eAttrs.type) ? businessTie : personalTie;
+      bucket.add(s); bucket.add(t);
+    });
+    const derivedBusiness = (id, attrs) => isBusinessContact({
+      flagged: attrs.business, isOwner: attrs.isOwner, gender: attrs.gender,
+      hasBusinessTie: businessTie.has(id), hasPersonalTie: personalTie.has(id),
+    });
+
     const nodes = [];
     this.graph.forEachNode((id, attrs) => {
       const nid = Number(id);
@@ -142,6 +161,7 @@ class GraphStore {
         locationPrecision: attrs.locationPrecision,
         locationSource: attrs.locationSource,
         deceased: !!attrs.deceased,
+        business: derivedBusiness(id, attrs),
         starred: attrs.starred,
         isOwner: !!attrs.isOwner,
         lastInteractionAt: lastInteraction.get(nid) ?? null,

@@ -34,26 +34,28 @@ export class InsightsView {
 
     // --- top stat tiles ---
     const tiles = el("div", "stat-tiles");
-    const tile = (num, label) => {
+    const tile = (num, label, hint) => {
       const t = el("div", "stat-tile");
+      t.title = hint;
       t.append(el("div", "stat-num", num), el("div", "stat-label mono", label));
       tiles.append(t);
     };
-    tile(x.contacts.toLocaleString(), "contacts");
-    tile(x.edges.toLocaleString(), "connections");
-    tile(String(x.connectivity.avgDegree), "avg connections");
-    tile(String(x.connectivity.hubs), "hubs (20+)");
-    tile(String(x.connectivity.isolated), "isolated");
-    tile(`${x.cadence.withCadence}`, "with cadence");
-    tile(String(x.overdue.length), "overdue");
-    tile(String(x.missing.email), "no email");
+    tile(x.contacts.toLocaleString(), "contacts", "Live contacts, not counting anything in the trash");
+    tile(x.edges.toLocaleString(), "connections", "Relationships recorded between your contacts");
+    tile(String(x.connectivity.avgDegree), "avg connections", "How many connections a typical contact has");
+    tile(String(x.connectivity.hubs), "hubs (20+)", "Contacts with 20 or more connections: the people who hold your network together");
+    tile(String(x.connectivity.isolated), "isolated", "Contacts with no connections at all. Linking them makes the graph more useful");
+    tile(`${x.cadence.withCadence}`, "with cadence", "Contacts with a keep-in-touch reminder set");
+    tile(String(x.overdue.length), "overdue", "Contacts you have not reached within their keep-in-touch cadence");
+    tile(String(x.missing.email), "no email", "Contacts with no email address on file");
     page.append(tiles);
 
     const grid = el("div", "insights-grid");
     page.append(grid);
 
     // --- needs attention ---
-    const attn = this.card("Needs attention");
+    const attn = this.card("Needs attention",
+      "People past their keep-in-touch cadence, plus well-connected people you have not spoken to in a long time");
     if (!x.overdue.length && !x.dormant.length) {
       attn.append(el("p", "dim", "Nobody is overdue. Set a keep-in-touch cadence to get nudges."));
     }
@@ -66,12 +68,12 @@ export class InsightsView {
     grid.append(attn);
 
     // --- top connectors ---
-    const conn = this.card("Top connectors");
+    const conn = this.card("Top connectors", "The contacts with the most connections in your network");
     for (const c of x.connectors) this.personRow(conn, c.id, c.name, "knows the most people", `${c.degree}°`);
     grid.append(conn);
 
     // --- recently added ---
-    const recent = this.card("Recently added");
+    const recent = this.card("Recently added", "The newest contacts in your database, most recent first");
     for (const r of x.recentlyAdded) this.personRow(recent, r.id, r.name, r.org ?? "", fmtDays(r.createdAt));
     grid.append(recent);
 
@@ -83,8 +85,9 @@ export class InsightsView {
     grid.append(this.distCard("Top tags", x.tags, null));
 
     // --- interactive breakdown ("extract insights over and above") ---
-    const bk = this.card("Break down by…");
+    const bk = this.card("Break down by…", "Count your contacts across any dimension you choose");
     const sel = el("select");
+    sel.title = "Which dimension to group your contacts by";
     for (const [k, label] of BREAKDOWN_DIMS) sel.append(new Option(label, k));
     const out = el("div", "breakdown-out");
     sel.addEventListener("change", () => this.renderBreakdown(out, sel.value));
@@ -93,15 +96,18 @@ export class InsightsView {
     grid.append(bk);
   }
 
-  card(title) {
+  card(title, hint) {
     const c = el("div", "insight-card");
-    c.append(el("h3", null, title));
+    const h = el("h3", null, title);
+    if (hint) h.title = hint;
+    c.append(h);
     return c;
   }
 
   personRow(card, id, name, sub, meta) {
     const row = el("button", "conn-row");
     row.type = "button";
+    row.title = `Open ${name}`;
     row.append(el("span", null, name));
     if (sub) row.append(el("span", "row-sub dim", sub));
     if (meta) row.append(el("span", "conn-degree mono", String(meta)));
@@ -110,11 +116,17 @@ export class InsightsView {
   }
 
   distCard(title, values, total) {
-    const c = this.card(title);
+    const c = this.card(title, total
+      ? `How your ${total.toLocaleString()} contacts break down by ${title.toLowerCase()}`
+      : `How your network breaks down by ${title.toLowerCase()}`);
     if (!values?.length) { c.append(el("p", "dim", "No data.")); return c; }
     const max = Math.max(...values.map((v) => v.count));
     for (const v of values) {
       const row = el("div", "dist-row");
+      const label = v.label ?? v.value;
+      row.title = total
+        ? `${label}: ${v.count} of ${total.toLocaleString()} contacts (${Math.round((v.count / total) * 100)}%)`
+        : `${label}: ${v.count}`;
       const bar = el("div", "dist-bar");
       const fill = el("div", "dist-fill");
       fill.style.width = `${(v.count / max) * 100}%`;
@@ -137,6 +149,7 @@ export class InsightsView {
       const max = Math.max(...b.values.map((v) => v.count));
       for (const v of b.values) {
         const row = el("div", "dist-row");
+        row.title = `${v.value}: ${v.count} contact${v.count === 1 ? "" : "s"}`;
         const bar = el("div", "dist-bar");
         const fill = el("div", "dist-fill");
         fill.style.width = `${(v.count / max) * 100}%`;

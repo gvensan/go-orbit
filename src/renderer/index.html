@@ -95,6 +95,13 @@
     <symbol id="nav-map" viewBox="0 0 24 24">
       <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>
     </symbol>
+    <!-- Fade links: a tie that stays solid at one end and dissolves at the other. -->
+    <symbol id="ico-fade" viewBox="0 0 24 24">
+      <path d="M4 20 11 13"/>
+      <path d="M13.6 10.4 20 4" opacity=".38" stroke-dasharray="1.6 3"/>
+      <circle cx="4" cy="20" r="1.8" fill="currentColor" stroke="none"/>
+      <circle cx="20" cy="4" r="1.8" fill="currentColor" stroke="none" opacity=".38"/>
+    </symbol>
     <symbol id="nav-explore" viewBox="0 0 24 24">
       <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 4v16"/>
     </symbol>
@@ -133,16 +140,16 @@
   <header id="topbar">
     <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#orbit-mark"/></svg>Orbit</div>
     <div class="view-switch" role="tablist" aria-label="View">
-      <button type="button" id="view-network" class="active" data-view="network"><svg class="view-icon" aria-hidden="true"><use href="#nav-graph"/></svg>Network</button>
-      <button type="button" id="view-geomap" data-view="geomap">Geomap</button>
-      <button type="button" id="view-explore" data-view="explore">Explore</button>
-      <button type="button" id="view-find" data-view="find">Find</button>
+      <button type="button" id="view-network" class="active" data-view="network" title="Network: your contacts as an interactive graph"><svg class="view-icon" aria-hidden="true"><use href="#nav-graph"/></svg>Network</button>
+      <button type="button" id="view-geomap" data-view="geomap" title="Geomap: where your contacts are on the world map">Geomap</button>
+      <button type="button" id="view-explore" data-view="explore" title="Explore: the filterable contact table with facets and bulk actions">Explore</button>
+      <button type="button" id="view-find" data-view="find" title="Find: build a precise query across every contact field">Find</button>
     </div>
-    <button id="search-trigger" type="button" aria-haspopup="dialog">
+    <button id="search-trigger" type="button" aria-haspopup="dialog" data-shortcut-title="Search contacts or run a command|K" title="Search contacts or run a command (Cmd/Ctrl+K)">
       <span>Search or run a command…</span>
       <kbd id="palette-kbd" data-shortcut="K">Cmd/Ctrl+K</kbd>
     </button>
-    <div id="status" class="mono" aria-live="polite"></div>
+    <div id="status" class="mono" aria-live="polite" title="Contacts and connections stored on this device, and when the last backup was taken"></div>
     <button id="update-pill" class="update-pill" type="button" hidden aria-live="polite"></button>
     <button id="theme-toggle" type="button" aria-label="Toggle light/dark theme" title="Toggle theme">🌙</button>
   </header>
@@ -150,9 +157,9 @@
   <div id="sample-banner" hidden>
     <span id="sample-banner-text" class="mono"></span>
     <div class="sample-banner-actions">
-      <button id="sample-switch" type="button" class="ghost"></button>
+      <button id="sample-switch" type="button" class="ghost" title="Load the other sample size"></button>
       <button id="sample-exit" type="button" class="ghost" title="Back to the start screen">Exit exploring</button>
-      <button id="sample-reset" type="button" class="primary">Start my own network →</button>
+      <button id="sample-reset" type="button" class="primary" title="Clear the sample and start an empty network of your own">Start my own network →</button>
       <button id="sample-dismiss" type="button" class="ghost" title="Hide this bar for now" aria-label="Dismiss">✕</button>
     </div>
   </div>
@@ -160,21 +167,21 @@
   <main id="main">
     <nav id="sidebar" aria-label="Navigation">
       <div class="nav-section-label">View</div>
-      <button type="button" class="nav-item active" data-nav="network" title="Network"><svg class="nav-icon" aria-hidden="true"><use href="#nav-graph"/></svg><span>Network</span></button>
-      <button type="button" class="nav-item" data-nav="geomap" title="Geomap"><svg class="nav-icon" aria-hidden="true"><use href="#nav-map"/></svg><span>Geomap</span></button>
-      <button type="button" class="nav-item" data-nav="list" data-shortcut-title="Explore|L" title="Explore (Cmd/Ctrl+L)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-explore"/></svg><span>Explore</span></button>
+      <button type="button" class="nav-item active" data-nav="network" title="Network: your contacts as an interactive graph"><svg class="nav-icon" aria-hidden="true"><use href="#nav-graph"/></svg><span>Network</span></button>
+      <button type="button" class="nav-item" data-nav="geomap" title="Geomap: where your contacts are on the world map"><svg class="nav-icon" aria-hidden="true"><use href="#nav-map"/></svg><span>Geomap</span></button>
+      <button type="button" class="nav-item" data-nav="list" data-shortcut-title="Explore the contact table|L" title="Explore the contact table (Cmd/Ctrl+L)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-explore"/></svg><span>Explore</span></button>
 
       <div class="nav-divider" role="separator"></div>
       <div class="nav-section-label">Data</div>
-      <button type="button" class="nav-item" data-nav="find" title="Find"><svg class="nav-icon" aria-hidden="true"><use href="#nav-find"/></svg><span>Find</span></button>
-      <button type="button" class="nav-item" data-nav="insights" title="Insights"><svg class="nav-icon" aria-hidden="true"><use href="#nav-insights"/></svg><span>Insights</span>
-        <b id="attention-badge" class="nav-badge" hidden></b></button>
-      <button type="button" class="nav-item" data-nav="import" title="Import contacts"><svg class="nav-icon" aria-hidden="true"><use href="#nav-import"/></svg><span>Import</span></button>
-      <button type="button" class="nav-item" data-nav="export-archive" data-shortcut-title="Export archive|E" title="Export archive (Cmd/Ctrl+E)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-export"/></svg><span>Export</span></button>
-      <button type="button" class="nav-item" data-nav="dedup" title="Review duplicates"><svg class="nav-icon" aria-hidden="true"><use href="#nav-duplicates"/></svg><span>Duplicates</span></button>
+      <button type="button" class="nav-item" data-nav="find" title="Find: build a precise query across every contact field"><svg class="nav-icon" aria-hidden="true"><use href="#nav-find"/></svg><span>Find</span></button>
+      <button type="button" class="nav-item" data-nav="insights" title="Insights: connectors, overdue contacts, and breakdowns of your network"><svg class="nav-icon" aria-hidden="true"><use href="#nav-insights"/></svg><span>Insights</span>
+        <b id="attention-badge" class="nav-badge" hidden title="People who need attention right now"></b></button>
+      <button type="button" class="nav-item" data-nav="import" title="Import contacts from a vCard, CSV, or Orbit archive"><svg class="nav-icon" aria-hidden="true"><use href="#nav-import"/></svg><span>Import</span></button>
+      <button type="button" class="nav-item" data-nav="export-archive" data-shortcut-title="Export an encrypted archive of everything|E" title="Export an encrypted archive of everything (Cmd/Ctrl+E)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-export"/></svg><span>Export</span></button>
+      <button type="button" class="nav-item" data-nav="dedup" title="Review likely duplicate contacts and merge them"><svg class="nav-icon" aria-hidden="true"><use href="#nav-duplicates"/></svg><span>Duplicates</span></button>
 
       <div class="nav-divider" role="separator"></div>
-      <button type="button" class="nav-item" data-nav="trash" title="Trash"><svg class="nav-icon" aria-hidden="true"><use href="#nav-trash"/></svg><span>Trash</span></button>
+      <button type="button" class="nav-item" data-nav="trash" title="Trash: restore deleted contacts, or remove them for good"><svg class="nav-icon" aria-hidden="true"><use href="#nav-trash"/></svg><span>Trash</span></button>
       <div class="nav-spacer"></div>
       <div class="nav-divider" role="separator"></div>
       <button type="button" class="nav-item" data-nav="settings" data-shortcut-title="Settings|," title="Settings (Cmd/Ctrl+,)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-settings"/></svg><span>Settings</span><b id="update-dot" class="nav-dot" hidden></b></button>
@@ -184,14 +191,14 @@
     <div id="graph-wrap">
       <div id="graph-root" aria-label="Relationship graph"></div>
       <div id="canvas-view-toggle" class="canvas-view-toggle" role="tablist" aria-label="Canvas layout">
-        <button type="button" class="active" data-canvas="graph" aria-selected="true"><svg class="view-icon" aria-hidden="true"><use href="#nav-graph"/></svg>Graph</button>
-        <button type="button" data-canvas="mesh" aria-selected="false"><svg class="view-icon" aria-hidden="true"><use href="#nav-mesh"/></svg>Mesh</button>
-        <button type="button" data-canvas="orbit" aria-selected="false"><svg class="view-icon" aria-hidden="true"><use href="#nav-orbit"/></svg>Orbit</button>
-        <button type="button" data-canvas="reach" aria-selected="false"><svg class="view-icon" aria-hidden="true"><use href="#nav-reach"/></svg>Reach</button>
-        <button type="button" data-canvas="cluster" aria-selected="false"><svg class="view-icon" aria-hidden="true"><use href="#nav-cluster"/></svg>Clusters</button>
-        <button type="button" data-canvas="tree" aria-selected="false"><svg class="view-icon" aria-hidden="true"><use href="#nav-tree"/></svg>Tree</button>
+        <button type="button" class="active" data-canvas="graph" aria-selected="true" title="Graph: the free-form layout, centred on whoever you select"><svg class="view-icon" aria-hidden="true"><use href="#nav-graph"/></svg>Graph</button>
+        <button type="button" data-canvas="mesh" aria-selected="false" title="Mesh: every contact on one ring, every connection a chord across it"><svg class="view-icon" aria-hidden="true"><use href="#nav-mesh"/></svg>Mesh</button>
+        <button type="button" data-canvas="orbit" aria-selected="false" title="Orbit: you at the centre, rings ordered by the measure you pick below"><svg class="view-icon" aria-hidden="true"><use href="#nav-orbit"/></svg>Orbit</button>
+        <button type="button" data-canvas="reach" aria-selected="false" title="Reach: you at the centre, rings by degrees of separation (1 hop, 2 hops…)"><svg class="view-icon" aria-hidden="true"><use href="#nav-reach"/></svg>Reach</button>
+        <button type="button" data-canvas="cluster" aria-selected="false" title="Clusters: your network grouped into communities. Click one to open it"><svg class="view-icon" aria-hidden="true"><use href="#nav-cluster"/></svg>Clusters</button>
+        <button type="button" data-canvas="tree" aria-selected="false" title="Tree: family by generation, starting at you. Expand with the + buttons"><svg class="view-icon" aria-hidden="true"><use href="#nav-tree"/></svg>Tree</button>
         <span class="cv-sep" aria-hidden="true"></span>
-        <button type="button" id="edge-fade-toggle" class="cv-toggle" aria-pressed="false" title="Fade the connection lines so the node structure reads more clearly">Fade links</button>
+        <button type="button" id="edge-fade-toggle" class="cv-toggle cv-icon" aria-pressed="false" aria-label="Fade links" title="Fade the connection lines so the node structure reads more clearly"><svg class="view-icon" aria-hidden="true"><use href="#ico-fade"/></svg></button>
       </div>
       <div id="canvas-controls" class="canvas-controls">
         <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
@@ -206,8 +213,10 @@
         </span>
       </div>
       <div id="orbit-controls" class="orbit-controls" hidden>
-        <label class="mono dim">rings by
-          <select id="orbit-metric">
+        <!-- Option-level titles are not shown: the select popup is drawn by the OS,
+             so the whole legend lives on the control itself. -->
+        <label class="mono dim" title="What decides which ring a contact sits on. recency: last in touch. overdue: furthest past their cadence. connections: most connected. influence: bridges separate parts of your network. Highest ranked sit closest to the centre">rings by
+          <select id="orbit-metric" title="What decides which ring a contact sits on. recency: last in touch. overdue: furthest past their cadence. connections: most connected. influence: bridges separate parts of your network. Highest ranked sit closest to the centre">
             <option value="recency">recency</option>
             <option value="cadence">overdue (cadence)</option>
             <option value="degree">connections</option>
@@ -216,16 +225,18 @@
         </label>
       </div>
       <div id="tree-anchor" class="tree-anchor" hidden>
-        <label class="mono dim" for="tree-anchor-input">anchor</label>
-        <input id="tree-anchor-input" type="text" autocomplete="off" spellcheck="false" placeholder="You (default)" aria-label="Anchor the tree on a pair" aria-expanded="false" role="combobox" aria-controls="tree-anchor-list">
+        <label class="mono dim" for="tree-anchor-input" title="Re-root the family tree on a chosen couple instead of you">anchor</label>
+        <input id="tree-anchor-input" type="text" autocomplete="off" spellcheck="false" placeholder="You (default)" title="Re-root the family tree on a chosen couple. Leave empty to start from you" aria-label="Anchor the tree on a pair" aria-expanded="false" role="combobox" aria-controls="tree-anchor-list">
         <ul id="tree-anchor-list" class="tree-anchor-list" role="listbox" hidden></ul>
       </div>
       <div id="graph-nav" hidden>
         <button id="graph-home" type="button" title="Back to home graph" aria-label="Back to home graph">⌂</button>
         <button id="graph-back" type="button"></button>
+        <span id="graph-nav-focus" class="graph-nav-focus" hidden></span>
       </div>
-      <div id="legend" class="mono" hidden></div>
-      <div id="legend-gender" class="mono" hidden></div>
+      <div id="legend" class="mono" hidden title="Relationship colours. Hover an entry to isolate that link type, click to hide it"></div>
+      <div id="legend-cluster" class="mono" hidden title="Cluster kinds. Click an entry to hide those clusters"></div>
+      <div id="legend-gender" class="mono" hidden title="Gender rings. Hover an entry to isolate those contacts, click to hide them"></div>
       <div id="graph-hint" class="mono" hidden></div>
     </div>
     <div id="geomap" hidden aria-label="Geomap"></div>
@@ -248,7 +259,7 @@
          deletes always go to a recoverable trash first.</p>
     </div>
     <div class="empty-actions">
-      <button id="btn-onboard" type="button" class="primary">Get started</button>
+      <button id="btn-onboard" type="button" class="primary" title="Continue to the start screen">Get started</button>
     </div>
     <p class="mono dim">Move devices any time with an encrypted export archive (<span data-shortcut="E">Cmd/Ctrl+E</span>)</p>
   </section>
@@ -261,12 +272,12 @@
       <p>Build your network, or explore a ready-made sample.<br />
          Everything stays on this device, encrypted.</p>
       <div class="empty-actions">
-        <button id="btn-setup" type="button" class="primary">Set up my network</button>
+        <button id="btn-setup" type="button" class="primary" title="Tell Orbit who you are, then add or import your first contacts">Set up my network</button>
       </div>
       <div class="empty-samples mono dim">
         <span>Just exploring?</span>
-        <button id="btn-sample-small" type="button" class="ghost">Sample · 100</button>
-        <button id="btn-sample-large" type="button" class="ghost">Sample · 5,000</button>
+        <button id="btn-sample-small" type="button" class="ghost" title="Load 100 made-up contacts to try Orbit. Your own data is untouched">Sample · 100</button>
+        <button id="btn-sample-large" type="button" class="ghost" title="Load 5,000 made-up contacts to see Orbit at scale. Your own data is untouched">Sample · 5,000</button>
       </div>
     </div>
 
@@ -274,12 +285,12 @@
     <div id="landing-sample" hidden>
       <p id="landing-sample-text"></p>
       <div class="empty-actions">
-        <button id="landing-continue" type="button" class="primary">Continue exploring</button>
-        <button id="landing-switch" type="button" class="ghost"></button>
+        <button id="landing-continue" type="button" class="primary" title="Go back into the sample network you were exploring">Continue exploring</button>
+        <button id="landing-switch" type="button" class="ghost" title="Load the other sample size"></button>
       </div>
       <div class="empty-samples mono dim">
         <span>Ready for the real thing?</span>
-        <button id="landing-startown" type="button" class="ghost">Start my own network →</button>
+        <button id="landing-startown" type="button" class="ghost" title="Clear the sample and start an empty network of your own">Start my own network →</button>
       </div>
     </div>
   </section>

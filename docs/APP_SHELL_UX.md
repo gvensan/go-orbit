@@ -62,10 +62,25 @@ review for weak ones. Recent merges list with one-click undo.
 **Trash.** Soft-deleted contacts with deletion date; restore or purge (purge is
 a real delete, confirmed). Auto-purge after N days, surfaced clearly.
 
-**Settings.** Encryption status + change passphrase; backup status (last
-snapshot, restore-from-backup); export archive (with the passphrase option) and
-a contacts CSV export; update channel + "check now" + current version;
-about/diagnostics.
+**Settings.** Six tabs, one per concern; the last-viewed tab is remembered.
+*Review*: an on-demand data review - structural, relationship, quality, and
+graph-shape checks rendered as severity-ranked cards, each with a safe one-click
+fix where one exists, a deep link to the offending record otherwise, and
+per-finding triage (ignore/defer) keyed on a stable fingerprint so it survives
+reruns; a rerun replaces the deck and reports what resolved since last time.
+The last run's deck persists and is shown (triage re-merged) whenever the tab
+opens, so the screen is only empty before the first ever review.
+*You*: the owner profile the network is built around. *Appearance*: the graph
+color palette picker (Dusk default plus five named presets and a custom palette
+covering the six relationship colors and both gender rings; each palette has an
+explicit Apply button and the active one is badged - browsing and editing
+change nothing until applied; a per-device preference stored beside the theme,
+never in the database). *Privacy &
+Security*: encryption status, the online maps/location-search opt-out, the
+telemetry statement. *Data & Backups*: contact/connection counts and trash
+policy, export archive (with the passphrase option) and contacts CSV export,
+import, backup status + back-up-now + restore-from-backup, and the clear-all
+danger zone. *About*: version, update check/install, log file location.
 
 **First-run onboarding.** Explain local-first + encryption in one screen,
 generate and store the DB key in the OS keychain, then offer an optional first
@@ -111,6 +126,15 @@ action, in the interface's voice — no apologies, no raw stack traces. Map the
 - Respect `prefers-reduced-motion`: disable graph settle animation and path animations.
 - Color is never the only signal — pair edge-type color with the legend and, on selection, labels.
 - Keyboard operable end-to-end; visible focus; sufficient contrast on the dark surface.
+- **Hover help is `title`.** Set a plain `title` on any control that is not
+  self-explanatory (icon-only buttons, mode toggles, anything whose effect is
+  wider than its label, and any value the column may clip). `tooltip.js` picks
+  it up automatically, moves it out of the OS's reach, and draws it in the app's
+  type after `config.tooltip.showDelayMs`; it also shows on keyboard focus, so a
+  tooltip is not a mouse-only affordance. Never add a second tooltip mechanism,
+  and never rely on `title` alone to name a control - icon-only buttons still
+  need an `aria-label`. Tooltips say what the control does and what it will
+  affect ("acts on the 12 selected contacts"), never just restate the label.
 
 ## 7. Acceptance criteria
 

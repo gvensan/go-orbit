@@ -117,3 +117,12 @@ test("merge combines metadata when re-pointing collides with an existing family 
   assert.deepEqual(edgesRepo.listFor(db, primary.id)[0].metadata, primaryMetadata, "primary edge metadata was not restored");
   assert.deepEqual(edgesRepo.listFor(db, duplicate.id)[0].metadata, duplicateMetadata, "secondary edge metadata was not restored");
 });
+
+test("merging across the business flag never leaves a gendered business", (t) => {
+  const { db } = makeDb(t);
+  const person = contactsRepo.create(db, { name: "Ravi Stores", fields: { email: "shop@x.com", gender: "Male" } });
+  const biz = contactsRepo.create(db, { name: "Ravi Stores", fields: { email: "shop@x.com", business: "yes" } });
+  const { contact } = dedup.merge(db, { primaryId: biz.id, secondaryId: person.id });
+  assert.equal(contact.fields.business, "yes");
+  assert.equal(contact.fields.gender, undefined, "dedup merge kept a gender on a business");
+});

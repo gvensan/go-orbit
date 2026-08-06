@@ -6,6 +6,9 @@
  * @returns {{ headers: string[], rows: string[][] }}
  */
 function parseCSV(text) {
+  // Strip a UTF-8 BOM (we write one on export so Excel reads non-ASCII correctly);
+  // left in place it would corrupt the first header ("﻿name" != "name").
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const rows = [];
   let row = [];
   let field = "";
@@ -55,13 +58,9 @@ const HEADER_HINTS = [
   ["tags", /^(tags?|labels?|groups?|categories)$/i],
 ];
 
-/** "Female"/"Male" so gender rings match; other values pass through as typed. */
-function normGender(v) {
-  const g = v.trim().toLowerCase();
-  if (g === "f" || g === "female" || g === "woman") return "Female";
-  if (g === "m" || g === "male" || g === "man") return "Male";
-  return v.trim();
-}
+// Gender canonicalization lives in shared/field-types.js so the card's inline
+// editor and this import path can never disagree about what "f" means.
+const { normalizeGender: normGender } = require("../../shared/field-types");
 const TRUTHY = /^(y|yes|true|1|x|deceased)$/i;
 
 /** @returns {Record<string, string>} header -> field name ("" to ignore) */
@@ -89,7 +88,13 @@ function rowsToContacts(headers, rows, mapping) {
   for (const cells of rows) {
     const contact = { name: "", fields: {}, tags: [] };
     headers.forEach((h, i) => {
-      const value = (cells[i] ?? "").trim();
+      // Strip the spreadsheet formula-injection guard (a leading ' before an
+      // = + - @) that export adds, so values like phone "+91 …" round-trip clean.
+      const value = (cells[i] ?? "").trim().replace(/^'(?=[=+\-@])/, "");
+      // Preserve an annotation column from a prior "save results" export, even
+      // when it isn't mapped, so re-import can show what was imported vs ignored.
+      const hl = h.trim().toLowerCase();
+      if ((hl === "orbit_status" || hl === "orbit_status_at") && value) { contact.fields[hl] = value; return; }
       const field = mapping[h];
       if (!field || !value) return;
       if (field === "name") contact.name = value;
@@ -113,9 +118,17 @@ const EXPORT_COLUMNS = [
   "birthday", "nickname", "website", "linkedin", "notes", "tags",
 ];
 
-/** Quote a cell per RFC 4180 when it holds a comma, quote, or newline. */
+// Prepended to every exported file so Excel (esp. on Windows) reads it as UTF-8
+// and renders non-ASCII names (CJK, Arabic, …) correctly. parseCSV strips it back.
+const BOM = "﻿";
+
+/** Quote a cell per RFC 4180 (comma/quote/newline), and neutralise spreadsheet
+ *  formula injection: a cell starting with = + - @ (or a control char) is run as
+ *  a formula by Excel/Sheets - which also mangles "+"-leading phone numbers - so
+ *  prefix a single quote to keep it literal text. parseCSV strips the guard. */
 function csvCell(value) {
-  const s = value == null ? "" : String(value);
+  let s = value == null ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -138,7 +151,7 @@ function contactsToCSV(contacts) {
       return csvCell(f[col] ?? "");
     }).join(","));
   }
-  return lines.join("\r\n") + "\r\n";
+  return BOM + lines.join("\r\n") + "\r\n";
 }
 
 // The import wizard's Review-step columns, in on-screen order. The detailed CSV
@@ -175,7 +188,33 @@ function relationshipRowsToCSV(rows) {
       }
     }).join(","));
   }
-  return lines.join("\r\n") + "\r\n";
+  return BOM + lines.join("\r\n") + "\r\n";
 }
 
-module.exports = { parseCSV, suggestMapping, rowsToContacts, contactsToCSV, relationshipRowsToCSV, EXPORT_COLUMNS, REVIEW_COLUMNS };
+// Results annotation: the template columns plus the per-record outcome, so a
+// re-import can read `orbit_status` back (see rowsToContacts) and show what was
+// imported vs ignored.
+const RESULTS_COLUMNS = [...EXPORT_COLUMNS, "orbit_status", "orbit_status_at"];
+
+/**
+ * Serialize processed import rows with their outcome for the "save results" file.
+ * @param {{ name: string, fields?: Record<string,string>, tags?: string[], status?: string }[]} rows
+ * @param {string} [at] ISO date stamp written into orbit_status_at.
+ * @returns {string}
+ */
+function resultsToCSV(rows, at = "") {
+  const lines = [RESULTS_COLUMNS.join(",")];
+  for (const r of rows) {
+    const f = r.fields || {};
+    lines.push(RESULTS_COLUMNS.map((col) => {
+      if (col === "name") return csvCell(r.name);
+      if (col === "tags") return csvCell((r.tags || []).join(";"));
+      if (col === "orbit_status") return csvCell(r.status ?? "");
+      if (col === "orbit_status_at") return csvCell(at);
+      return csvCell(f[col] ?? "");
+    }).join(","));
+  }
+  return BOM + lines.join("\r\n") + "\r\n";
+}
+
+module.exports = { parseCSV, suggestMapping, rowsToContacts, contactsToCSV, relationshipRowsToCSV, resultsToCSV, EXPORT_COLUMNS, REVIEW_COLUMNS };

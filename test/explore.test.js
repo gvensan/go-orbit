@@ -210,3 +210,26 @@ test("Explore rows expose standard, resolved-location, activity, and system fiel
   assert.equal(typeof row.createdAt, "number");
   assert.equal(typeof row.updatedAt, "number");
 });
+
+test("a vendor lists under Organizations by its own name", (t) => {
+  const { db } = makeDb(t);
+  const { a } = seed(db);
+  // Flagged business, no company field of its own.
+  const shop = contacts.create(db, { name: "ACT Support", fields: { business: "yes", phone: "1800" } });
+  edges.create(db, { sourceId: a.id, targetId: shop.id, type: "vendor", directed: false });
+  // Unflagged vendor-only contact (pre-flag data): derived business.
+  const cable = contacts.create(db, { name: "Whitehouse Cable", fields: {} });
+  edges.create(db, { sourceId: a.id, targetId: cable.id, type: "vendor", directed: false });
+  const s = svc(db);
+
+  const orgFacet = new Map(s.query({}).facets.orgs.map((f) => [f.value, f.count]));
+  assert.equal(orgFacet.get("ACT Support"), 1, "flagged vendor missing from Organizations");
+  assert.equal(orgFacet.get("Whitehouse Cable"), 1, "derived vendor missing from Organizations");
+  assert.equal(orgFacet.get("Acme"), 2, "real companies unchanged");
+
+  const filtered = s.query({ filters: { orgs: ["ACT Support"] } });
+  assert.deepEqual(filtered.results.map((r) => r.name), ["ACT Support"], "org filter must match the vendor");
+  // Alice (a person with a vendor tie but personal ties too) stays a person.
+  const alice = s.query({ text: "Alice" }).results[0];
+  assert.equal(alice.org, "Acme");
+});

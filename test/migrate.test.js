@@ -7,7 +7,8 @@ const path = require("path");
 const { migrate } = require("../src/main/db/migrate");
 const { tmpDir, openKeyed, makeDb, TEST_KEY } = require("./helpers");
 
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 8;
+const migName = (n, name) => `${String(n).padStart(4, "0")}_${name}.sql`;
 
 test("fresh DB migrates to the current version with the full schema", (t) => {
   const { db } = makeDb(t);
@@ -40,7 +41,7 @@ test("non-contiguous migration versions are rejected", (t) => {
   const { db, dir } = makeDb(t);
   const migDir = path.join(dir, "migrations");
   fs.mkdirSync(migDir);
-  fs.writeFileSync(path.join(migDir, `000${CURRENT_VERSION + 2}_skip.sql`), "SELECT 1;");
+  fs.writeFileSync(path.join(migDir, migName(CURRENT_VERSION + 2, "skip")), "SELECT 1;");
   assert.throws(
     () => migrate(db, { backupDir: path.join(dir, "b"), migrationsDir: migDir }),
     new RegExp(`gap: expected v${CURRENT_VERSION + 1}`)
@@ -52,7 +53,7 @@ test("a failing migration rolls back completely and reports its backup", (t) => 
   const migDir = path.join(dir, "migrations");
   fs.mkdirSync(migDir);
   // First statement succeeds, second fails: the whole migration must roll back.
-  const boomName = `000${CURRENT_VERSION + 1}_boom.sql`;
+  const boomName = migName(CURRENT_VERSION + 1, "boom");
   fs.writeFileSync(
     path.join(migDir, boomName),
     "INSERT INTO contacts (name, fields, created_at, updated_at) VALUES ('Ghost', '{}', 0, 0);\n" +

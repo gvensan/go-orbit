@@ -55,7 +55,7 @@ export interface ContactPatch {
   cadenceDays?: number;
 }
 
-export type EdgeType = "colleague" | "family" | "introduced" | "friend" | string;
+export type EdgeType = "colleague" | "family" | "introduced" | "friend" | "acquaintance" | "vendor" | string;
 
 export interface Edge {
   sourceId: number;
@@ -112,6 +112,9 @@ export interface GraphNode {
   /** Resolver used for the stored coordinates. */
   locationSource?: string;
   deceased?: boolean;
+  /** A business (vendor, service, shop) rather than a person: no gender ring,
+   *  no kinship, never in the family tree. */
+  business?: boolean;
   starred?: boolean;
   /** True for the owner ("you") node - the centre of your network. */
   isOwner?: boolean;
@@ -406,6 +409,8 @@ export interface ImportReport {
   imported: number;
   merged: number;
   skipped: number;
+  /** Records the user chose to ignore in the wizard Resolve step. */
+  ignored?: number;
   duplicatesFound: number;
   schemaVersion: number;
   /** Local ids of newly inserted contacts, for post-import steps (location
@@ -439,6 +444,55 @@ export interface DedupPairSide {
   company?: string;
 }
 
+// --- health (admin review) -------------------------------------------------
+
+/** User triage of a finding; "open" clears a previous triage. */
+export type HealthStatus = "open" | "ignored" | "deferred";
+
+export type HealthSeverity = "error" | "warn" | "info";
+export type HealthCategory = "structure" | "relationships" | "quality" | "graph";
+
+/** A safe auto-repair the health engine can apply. Edge repairs carry the
+ *  edge's identity (source, target, type - the edges table's primary key). */
+export interface HealthFix {
+  kind: "remove-edge" | "canonicalize-edge" | "clear-kin" | "clear-stray-kin" | "strip-gender" | "clear-cadence" | "purge-orphans";
+  label: string;
+  sourceId?: number;
+  targetId?: number;
+  type?: string;
+  contactId?: number;
+}
+
+export type HealthFixRequest = Omit<HealthFix, "label">;
+
+export interface HealthFinding {
+  /** Stable across runs (check id + anchor); triage is keyed on it. */
+  fingerprint: string;
+  check: string;
+  category: HealthCategory;
+  severity: HealthSeverity;
+  title: string;
+  detail: string;
+  /** A contact the renderer can open for this finding, when one applies. */
+  contactId: number | null;
+  /** Live contacts to focus on the canvas ("Show on graph"), when they exist -
+   *  a tie's endpoints, or a sample of an isolated/unreachable group. */
+  focusIds: number[] | null;
+  fix: HealthFix | null;
+  /** Renderer-side navigation suggestion: open-contact | open-dedup | open-profile. */
+  action: string | null;
+  status: HealthStatus;
+}
+
+export interface HealthScanResult {
+  findings: HealthFinding[];
+  counts: { error: number; warn: number; info: number };
+  /** Findings from the previous run that no longer appear. */
+  resolvedCount: number;
+  lastRunAt: Timestamp;
+  previousRunAt: Timestamp | null;
+}
+
 export interface DedupPair {
   aId: number;
   bId: number;
@@ -446,6 +500,35 @@ export interface DedupPair {
   b: DedupPairSide;
   score: number;
   reason: string;
+}
+
+/** One existing contact proposed as a match for an incoming import record. */
+export interface MatchCandidate {
+  contactId: number;
+  name: string;
+  /** 0..1 confidence; 1.0 = shared email. */
+  score: number;
+  /** Human-readable reasons the match was proposed (e.g. "shares an email"). */
+  reasons: string[];
+  email: string;
+  phone: string;
+  company: string;
+  /** A few of the candidate's current connections, for the user to judge context. */
+  connections: { id: number; name: string; type: string }[];
+}
+
+/** Match preview for one incoming record (parallel to the request records). */
+export interface MatchResult {
+  candidates: MatchCandidate[];
+  /** Indices of other incoming records that share a strong key with this one. */
+  inFileDup: number[];
+}
+
+/** A per-record decision made by the user in the wizard Resolve step. */
+export interface ImportDecision {
+  mode: "ignore" | "new" | "merge";
+  /** Required when mode is "merge": the existing contact to merge into. */
+  targetId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,9 +628,21 @@ export interface IpcContract {
         fields?: Record<string, string>;
         tags?: string[];
         rel?: { type: string; role?: string; recip?: string | null; existingId?: number; batchIndex?: number };
+        decision?: ImportDecision;
       }[];
     };
     response: ImportReport & { relationships: number };
+  };
+  "import:match": {
+    request: { records: { name: string; fields?: Record<string, string> }[] };
+    response: { results: MatchResult[] };
+  };
+  "import:writeResults": {
+    request: {
+      destPath: string;
+      rows: { name: string; fields?: Record<string, string>; tags?: string[]; status?: string }[];
+    };
+    response: { path: string; ok: boolean; count: number };
   };
 
   "dialog:openFile": {
@@ -557,6 +652,18 @@ export interface IpcContract {
   "dialog:saveFile": {
     request: { defaultName?: string; filters?: { name: string; extensions: string[] }[] };
     response: { path: string | null };
+  };
+
+  "health:scan": { request: {}; response: HealthScanResult };
+  /** The persisted result of the most recent scan; null before the first run. */
+  "health:last": { request: {}; response: HealthScanResult | null };
+  "health:setStatus": {
+    request: { fingerprint: string; status: HealthStatus };
+    response: { ok: boolean };
+  };
+  "health:fix": {
+    request: HealthFixRequest;
+    response: { ok: boolean; changed: number };
   };
 
   "dedup:candidates": { request: {}; response: { pairs: DedupPair[] } };
@@ -654,6 +761,12 @@ export interface RendererApi {
     merge: Call<"dedup:merge">;
     undo: Call<"dedup:undo">;
   };
+  health: {
+    scan: Call<"health:scan">;
+    last: Call<"health:last">;
+    setStatus: Call<"health:setStatus">;
+    fix: Call<"health:fix">;
+  };
   dialogs: {
     openFile: Call<"dialog:openFile">;
     saveFile: Call<"dialog:saveFile">;
@@ -694,6 +807,8 @@ export interface RendererApi {
     importFile: Call<"import:file">;
     importParse: Call<"import:parse">;
     importRecords: Call<"import:records">;
+    importMatch: Call<"import:match">;
+    importWriteResults: Call<"import:writeResults">;
     seedSample: Call<"data:seedSample">;
     sampleStatus: Call<"data:sampleStatus">;
   };

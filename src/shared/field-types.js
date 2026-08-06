@@ -3,7 +3,7 @@
 // Dates are stored as ISO yyyy-mm-dd strings (native <input type=date> value).
 
 // Yes/no fields render as a checkbox (value stored as "yes" / absent). Expandable.
-const BOOLEAN_FIELDS = ["deceased"];
+const BOOLEAN_FIELDS = ["deceased", "business"];
 
 /** @returns {"bool"|"email"|"tel"|"date"|"url"|"text"} */
 function fieldType(key) {
@@ -47,4 +47,26 @@ function validateField(type, value) {
   }
 }
 
-module.exports = { fieldType, validateField, AUTOCOMPLETE_FIELDS, PRESET_VALUES };
+/** "Female"/"Male" so gender rings match; other values pass through as typed. */
+function normalizeGender(v) {
+  const g = String(v ?? "").trim().toLowerCase();
+  if (g === "f" || g === "female" || g === "woman") return "Female";
+  if (g === "m" || g === "male" || g === "man") return "Male";
+  return String(v ?? "").trim();
+}
+
+/**
+ * Canonical form for a field value wherever one is written. The card's inline
+ * editor and the import pipeline share this, so a hand-typed value can never
+ * drift from an imported one (untrimmed strings, "f" vs "Female", "1" vs
+ * "yes"). Returns "" when the value should clear the field.
+ */
+function normalizeFieldValue(key, value) {
+  const v = String(value ?? "").trim();
+  if (!v) return "";
+  if (String(key).trim().toLowerCase() === "gender") return normalizeGender(v);
+  if (fieldType(key) === "bool") return /^(y|yes|true|1|x)$/i.test(v) ? "yes" : "";
+  return v;
+}
+
+module.exports = { fieldType, validateField, normalizeGender, normalizeFieldValue, AUTOCOMPLETE_FIELDS, PRESET_VALUES };

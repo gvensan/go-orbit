@@ -63,9 +63,11 @@ export class Palette {
     const box = el("div", "palette");
     this.input = el("input");
     this.input.placeholder = "Search contacts or type a command…";
+    this.input.title = "Type a name to find a contact, or a few words to run a command. Arrow keys move, Enter opens";
     this.input.setAttribute("aria-label", "Search contacts or type a command");
     this.scopeBar = el("button", "scope-bar mono");
     this.scopeBar.type = "button";
+    this.scopeBar.title = "Switch between searching everyone and searching only the network you are looking at";
     this.scopeBar.hidden = true;
     this.scopeBar.addEventListener("click", () => {
       this.scopeOn = !this.scopeOn;
@@ -77,6 +79,7 @@ export class Palette {
     foot.append(el("span", null, "↑↓ navigate"), el("span", null, "↵ open"), el("span", null, "esc close"));
     this.clearHint = el("button", "palette-clear mono", "clear attention");
     this.clearHint.type = "button";
+    this.clearHint.title = "Hide the needs-attention suggestions for the rest of this session";
     this.clearHint.hidden = true;
     this.clearHint.addEventListener("mousedown", (e) => e.preventDefault()); // keep input focus
     this.clearHint.addEventListener("click", () => this.clearAttention());

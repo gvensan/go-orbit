@@ -8,12 +8,13 @@ import { EDGE_COLORS, EDGE_TYPES } from "./colors.js";
 import { ExploreView } from "./explore.js";
 import { GeoMap } from "./geomap.js";
 import { FindView } from "./find.js";
-import { GraphView, renderLegend } from "./graph-view.js";
+import { GraphView, renderLegend, renderClusterLegend } from "./graph-view.js";
 import { InsightsView } from "./insights.js";
 import { confirmModal, el, openModal, promptModal } from "./modal.js";
 import { Palette } from "./palette.js";
 import { disposeSettings, renderSettings } from "./settings.js";
 import { toast, toastError } from "./toast.js";
+import { hideTooltip, installTooltips } from "./tooltip.js";
 import { openDedupQueue, openRelationshipPicker, openTrash } from "./views.js";
 import { openImportWizard } from "./wizard.js";
 
@@ -64,7 +65,22 @@ let navStack = [];
 function updateBackButton() {
   const top = navStack[navStack.length - 1];
   $("graph-back").textContent = top ? `← Back to ${top.label}` : "← Back";
+  $("graph-back").title = top ? `Go back one step, to ${top.label}` : "Go back one step";
   $("graph-nav").hidden = navStack.length === 0;
+  clearNavFocus(); // any navigation drops the drilled-into label until a new one is set
+}
+
+/** Show the name of what we've drilled into (e.g. an opened cluster) next to Back. */
+function setNavFocus(label) {
+  const el = $("graph-nav-focus");
+  if (!el) return;
+  el.textContent = label || "";
+  el.title = label ? `You are looking at ${label}` : "";
+  el.hidden = !label;
+}
+function clearNavFocus() {
+  const el = $("graph-nav-focus");
+  if (el) { el.hidden = true; el.textContent = ""; }
 }
 
 /** Snapshot where we are right now as a restorer we can return to. */
@@ -128,10 +144,17 @@ function setCanvasView(which) {
   // (Cluster keeps it - its meta-edges carry the underlying relationship types.)
   const noLegend = which === "tree";
   $("legend").hidden = noLegend;
-  $("legend-gender").hidden = noLegend;
+  // The gender legend applies wherever contacts are drawn as themselves - Tree
+  // included. Only Cluster is out: a bubble is a mixed group, so there is no
+  // gender ring to filter on.
+  $("legend-gender").hidden = which === "cluster";
+  $("legend-cluster").hidden = which !== "cluster"; // person/org legend is Cluster-only
 }
 
 function showView(view) {
+  // Panes are hidden rather than removed, so an open tooltip's anchor stays in
+  // the DOM and the MutationObserver would not catch it. Drop it here instead.
+  hideTooltip();
   dismissLanding(); // any explicit view switch leaves the start screen
   if (currentView === "settings" && view !== "settings") disposeSettings($("settings"));
   currentView = view;
@@ -170,6 +193,7 @@ async function refreshAttentionBadge() {
     const badge = $("attention-badge");
     badge.hidden = n === 0;
     badge.textContent = String(n);
+    badge.title = `${n} ${n === 1 ? "person needs" : "people need"} attention: overdue or dormant`;
   } catch {}
 }
 
@@ -197,6 +221,7 @@ function renderUpdateHint(state) {
     pill.textContent = `↓ Downloading ${v}…`;
     pill.title = "A new version is downloading in the background.";
   }
+  dot.title = ready ? `${v} is ready to install` : `${v} is downloading`;
 }
 
 async function onUpdatePillClick() {
@@ -436,6 +461,7 @@ function showClusterGraph() {
   graphView.showClusters();
   setActiveNav("network");
   setCanvasView("cluster");
+  renderClusterLegend($("legend-cluster"), (kind) => graphView.toggleClusterKind(kind));
   const n = graphView.clusterMembers.size;
   showHint(n
     ? `Clusters - your network grouped into ${n} communit${n === 1 ? "y" : "ies"}. Click a cluster to open it.`
@@ -487,6 +513,7 @@ async function selectContact(id, /** @type {{ depth?: number, keepView?: boolean
       graphView.focus(id, state.depth);
       setCanvasView("graph"); // drilling in is an ego/force view; leave Mesh/Orbit
       showHint(`${contact.name}'s network · ${state.depth} hop${state.depth > 1 ? "s" : ""} · shift-click another node for the path`);
+      setNavFocus(contact.name); // whose network we're in, next to Back (as cluster drill-downs do)
     }
     card.depth = state.depth;
     card.show(contact, {
@@ -571,10 +598,15 @@ function onConnMenuKey(e) { if (e.key === "Escape") closeConnMenu(); }
 function showConnectionMenu(anchorId, anchorName, pos) {
   closeConnMenu();
   const menu = el("div", "node-menu");
-  menu.append(el("div", "node-menu-head mono", `New connection to ${anchorName}`));
+  const head = el("div", "node-menu-head mono", `New connection to ${anchorName}`);
+  head.title = `Creates a new contact already linked to ${anchorName}, then opens it so you can name them`;
+  menu.append(head);
   for (const type of EDGE_TYPES) {
     const item = el("button", "node-menu-item");
     item.type = "button";
+    item.title = type === "introduced"
+      ? `Add a new contact that ${anchorName} introduced. This link has a direction`
+      : `Add a new contact connected to ${anchorName} as ${type}`;
     const dot = el("span", "node-menu-dot");
     dot.style.background = EDGE_COLORS[type] ?? "";
     item.append(dot, el("span", null, type));
@@ -709,9 +741,11 @@ async function showAbout() {
   );
   summary.append(svg, copy);
   const version = el("p", "dim mono field-hint", "Version…");
+  version.title = "Orbit reports no usage data. Nothing about your contacts leaves this device";
   m.body.append(summary, version);
   const close = el("button", null, "Close");
   close.type = "button";
+  close.title = "Close this dialog (Esc)";
   close.addEventListener("click", m.close);
   m.foot.append(close);
   try {
@@ -862,28 +896,35 @@ function ownerOnboarding({ onDone } = {}) {
   const grid = el("div", "profile-grid");
   /** @type {Record<string, HTMLInputElement | HTMLSelectElement>} */
   const inputs = {};
-  const field = (key, label, placeholder) => {
-    grid.append(el("label", "profile-key mono", label));
+  const field = (key, label, placeholder, hint) => {
+    const lab = el("label", "profile-key mono", label);
+    lab.title = hint;
+    grid.append(lab);
     const input = /** @type {HTMLInputElement} */ (el("input"));
     input.placeholder = placeholder;
+    input.title = hint;
     inputs[key] = input;
     grid.append(input);
   };
-  field("name", "name", "your full name");
-  grid.append(el("label", "profile-key mono", "gender"));
+  field("name", "name", "your full name", "The name on your gold node in the graph. Everything else here is optional");
+  const genderLab = el("label", "profile-key mono", "gender");
+  genderLab.title = "Sets your ring colour on the graph and the kinship terms offered for your relatives";
+  grid.append(genderLab);
   const genderSel = /** @type {HTMLSelectElement} */ (el("select"));
+  genderSel.title = genderLab.title;
   genderSel.append(new Option("(unspecified)", ""));
   for (const g of ["Female", "Male"]) genderSel.append(new Option(g, g));
   inputs.gender = genderSel;
   grid.append(genderSel);
-  field("email", "email", "you@example.com");
-  field("company", "company", "company");
-  field("role", "role", "role / title");
+  field("email", "email", "you@example.com", "Your email address. Optional, and changeable later in Settings");
+  field("company", "company", "company", "Where you work. Also used to colour your node by organization");
+  field("role", "role", "role / title", "Your job title. Optional, and changeable later in Settings");
   m.body.append(grid);
 
   const actions = el("div", "card-actions");
   const save = /** @type {HTMLButtonElement} */ (el("button", "primary", "Save & continue"));
   save.type = "button";
+  save.title = "Save this profile and go on to build your network";
   save.addEventListener("click", async () => {
     /** @type {Record<string, string>} */
     const next = {};
@@ -903,6 +944,7 @@ function ownerOnboarding({ onDone } = {}) {
   });
   const skip = /** @type {HTMLButtonElement} */ (el("button", null, "Skip for now"));
   skip.type = "button";
+  skip.title = "Carry on without a profile. You can set who you are any time in Settings under You";
   skip.addEventListener("click", () => {
     m.close();
     onDone?.();
@@ -929,6 +971,7 @@ function promptOwnerAfterData({ onDone } = {}) {
   const search = /** @type {HTMLInputElement} */ (el("input"));
   search.type = "search";
   search.placeholder = "Search these contacts to set as you…";
+  search.title = "Type a name to find yourself among the contacts that just arrived";
   const results = el("div", "owner-results");
   m.body.append(search, results);
 
@@ -954,6 +997,7 @@ function promptOwnerAfterData({ onDone } = {}) {
     for (const h of hits) {
       const b = /** @type {HTMLButtonElement} */ (el("button", "owner-result"));
       b.type = "button";
+      b.title = `Make ${h.name} the gold "you" node your network centres on`;
       b.append(el("span", null, h.name));
       const meta = [h.role, h.org].filter(Boolean).join(" · ");
       if (meta) b.append(el("span", "dim mono", meta));
@@ -968,8 +1012,10 @@ function promptOwnerAfterData({ onDone } = {}) {
   const addRow = el("div", "owner-add");
   const nameInput = /** @type {HTMLInputElement} */ (el("input"));
   nameInput.placeholder = "Add yourself - your full name";
+  nameInput.title = "Use this when you are not already among these contacts. Press Enter to add yourself";
   const addBtn = /** @type {HTMLButtonElement} */ (el("button", "primary", "Add me"));
   addBtn.type = "button";
+  addBtn.title = "Create a contact for yourself and centre the network on it";
   const addMe = async () => {
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
@@ -987,6 +1033,7 @@ function promptOwnerAfterData({ onDone } = {}) {
 
   const skip = /** @type {HTMLButtonElement} */ (el("button", null, "Skip for now"));
   skip.type = "button";
+  skip.title = "Carry on without a \"you\" node. Home will not centre on anyone until you set one in Settings";
   skip.addEventListener("click", () => { m.close(); onDone?.(); });
   m.foot.append(skip);
   search.focus();
@@ -1026,14 +1073,17 @@ function csvExportOptions() {
     const m = openModal({ title: "Export CSV", onClose: () => settle(null) });
     m.body.append(el("p", null, "Exports your contacts in the import template's columns (re-imports cleanly)."));
     const opt = el("label", "form-check");
+    opt.title = "Off: one row per contact, in the import template's columns, which re-imports cleanly. On: one row per relationship with the kinship detail, for analysis elsewhere";
     const cb = el("input");
     cb.type = "checkbox";
     opt.append(cb, el("span", null, "Include relationships (the import review layout: relationship, relationship to, kinship, gender…) - one row per relationship, for offline analysis. This richer file is not meant for re-import."));
     m.body.append(opt);
     const cancel = el("button", null, "Cancel");
     cancel.type = "button";
+    cancel.title = "Close without exporting anything";
     const ok = el("button", "primary", "Export…");
     ok.type = "button";
+    ok.title = "Choose where to save the CSV";
     m.foot.append(cancel, ok);
     cancel.addEventListener("click", () => m.close());
     ok.addEventListener("click", () => { settle({ includeDetails: cb.checked }); m.close(); });
@@ -1120,6 +1170,19 @@ async function openGeomap() {
   setActiveNav("geomap");
 }
 
+/** (Re)build both legends from the live palette, keeping any active filters. */
+function refreshLegend() {
+  renderLegend(
+    $("legend"), $("legend-gender"),
+    (type) => graphView.toggleEdgeType(type),
+    (type) => graphView.isolateEdgeType(type),
+    () => graphView.clearIsolate(),
+    (gender) => graphView.toggleGender(gender),
+    (gender) => graphView.isolateGender(gender),
+    { types: graphView.hiddenTypes, genders: graphView.hiddenGenders },
+  );
+}
+
 function openSettingsPage() {
   state.selectedId = null;
   state.selectedName = null;
@@ -1131,6 +1194,16 @@ function openSettingsPage() {
     onExportCsv: () => exportCsvFlow(),
     onImport: () => startImport(),
     onChanged: () => onDataChanged(),
+    // Palette switch: the color objects are already retinted; repaint what
+    // baked them in (legend chips, canvas attributes, memoised tints).
+    onPaletteChanged: () => {
+      refreshLegend();
+      graphView.repaintPalette();
+    },
+    // Admin review: findings deep-link to the offending record.
+    onOpenContact: (id) => { pushNav(); showView("graph"); setActiveNav(null); selectContact(id); },
+    onOpenDedup: () => openDedupQueue({ onChanged: () => onDataChanged() }),
+    onShowOnGraph: (ids) => showOnGraph(ids, "Review"),
   });
   showView("settings");
 }
@@ -1307,6 +1380,9 @@ function focusCurrentFind() {
 }
 
 export async function init() {
+  // Before any UI is built, so every control created below (and everything
+  // rendered later) gets the in-app tooltip instead of the OS one.
+  installTooltips();
   graphView = new GraphView($("graph-root"), {
     onSelect: (id) => {
       if (id !== state.selectedId) pushNav(); // drill-down: remember where we were
@@ -1318,15 +1394,17 @@ export async function init() {
     // Tree: focus the family under this person (children grouped) and open the
     // card beside it, without leaving the Tree view.
     onTreeSelect: (id) => { graphView.treeActivate(id); selectContact(id, { keepView: true }); },
-    onClusterOpen: (memberIds, label) => {
+    onClusterOpen: (openIds, label, memberCount) => {
       pushNav(); // Back returns to the Clusters metagraph
       showView("graph");
       setCanvasView("graph"); // expand into a normal member subgraph (re-shows legends)
-      const n = graphView.focusSet(memberIds, { induce: false, nodeScale: 1.9, pairs: true, expandPartners: true });
+      graphView.focusSet(openIds, { induce: false, nodeScale: 1.9, pairs: true, expandPartners: true });
       card.hide();
       state.selectedId = null;
       setActiveNav("network");
-      showHint(`${label} · ${n} member${n === 1 ? "" : "s"}. Partners linked in pink · Click a node to open · Back returns to clusters.`);
+      setNavFocus(label); // show which cluster we opened, next to Back
+      const m = memberCount ?? openIds.length;
+      showHint(`${label} · ${m} member${m === 1 ? "" : "s"}. Partners linked in pink · Click a node to open · Back returns to clusters.`);
     },
   });
   explore = new ExploreView($("explore"), {
@@ -1436,7 +1514,15 @@ export async function init() {
           toast(`Louvain found ${count} communities.`);
         },
       },
-      { label: "Color by organization", run: () => graphView.setColorMode("org") },
+      { label: "Color by organization", hint: "contacts without a company show gray", run: () => graphView.setColorMode("org") },
+      {
+        label: "Color by relationship",
+        hint: "matches the legend",
+        run: () => {
+          graphView.setColorMode("relationship");
+          toast("Contacts are filled by their main relationship type.");
+        },
+      },
       { label: "Size by influence (betweenness)", hint: "worker", run: () => computeInfluence() },
       { label: "Load sample network (small)", hint: "100 contacts", run: () => loadSample("small") },
       { label: "Load sample network (large)", hint: "5,000 contacts", run: () => loadSample("large") },
@@ -1512,6 +1598,7 @@ export async function init() {
     graphView.setEdgeFade(!graphView.edgeFade);
     syncFadeBtn();
   });
+
   // Orbit ring-metric switch. Betweenness is computed off-thread on demand.
   const orbitMetricSel = /** @type {HTMLSelectElement} */ ($("orbit-metric"));
   orbitMetricSel.addEventListener("change", async () => {
@@ -1573,12 +1660,7 @@ export async function init() {
   $("graph-back").addEventListener("click", () => popNav());
   $("graph-home").addEventListener("click", () => goHome()); // skip straight home
 
-  renderLegend(
-    $("legend"), $("legend-gender"),
-    (type) => graphView.toggleEdgeType(type),
-    (type) => graphView.isolateEdgeType(type),
-    () => graphView.clearIsolate(),
-  );
+  refreshLegend();
   $("search-trigger").addEventListener("click", () => palette.open());
   $("btn-setup").addEventListener("click", () => ownerOnboarding({ onDone: async () => { await refreshSnapshot(); goHome(); palette.open(""); } }));
   $("btn-sample-small").addEventListener("click", () => loadSample("small"));

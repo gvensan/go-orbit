@@ -17,6 +17,8 @@ export function toast(message, { actionLabel, onAction, ttlMs = 6000 } = {}) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = actionLabel;
+    // The toast disappears on a timer, so say the action is time-limited.
+    btn.title = `${actionLabel} · available until this notice fades`;
     btn.addEventListener("click", () => {
       el.remove();
       onAction();

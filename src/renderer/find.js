@@ -5,6 +5,7 @@
 import config from "../main/config.js";
 import { el, openModal, promptModal } from "./modal.js";
 import { toast, toastError } from "./toast.js";
+import { RELATIONSHIP_TYPES } from "../shared/relationships.js";
 
 const api = () => window.api;
 const ROW_H = 40;
@@ -20,7 +21,7 @@ const FIELDS = [
   { key: "gender", label: "Gender", type: "enum", options: ["Female", "Male"] },
   { key: "notes", label: "Notes", type: "text" },
   { key: "tags", label: "Tag", type: "list" },
-  { key: "edgeType", label: "Relationship", type: "list", options: ["colleague", "friend", "acquaintance", "family", "introduced"] },
+  { key: "edgeType", label: "Relationship", type: "list", options: RELATIONSHIP_TYPES },
   { key: "degree", label: "Connections", type: "number" },
   { key: "lastAt", label: "Last interaction", type: "date" },
   { key: "cadenceDays", label: "Cadence (days)", type: "number" },
@@ -67,10 +68,12 @@ export class FindView {
     const bar = el("div", "find-bar");
     bar.append(el("span", "find-lead", "Find contacts matching"));
     this.matchSel = el("select", "find-match");
+    this.matchSel.title = "all: a contact must satisfy every condition. any: one condition is enough";
     this.matchSel.append(new Option("all", "all"), new Option("any", "any"));
     this.matchSel.addEventListener("change", () => { this.match = this.matchSel.value; });
     bar.append(this.matchSel, el("span", "find-lead", "of these conditions:"));
     this.savedSel = el("select", "find-saved");
+    this.savedSel.title = "Load a query you saved earlier. It replaces the conditions below and runs straight away";
     this.savedSel.append(new Option("Saved queries…", ""));
     this.savedSel.addEventListener("change", () => this.loadSaved(this.savedSel.value));
     bar.append(this.savedSel);
@@ -82,15 +85,19 @@ export class FindView {
     const controls = el("div", "find-controls");
     const addBtn = el("button", null, "+ Add condition");
     addBtn.type = "button";
+    addBtn.title = "Add another field test to the query";
     addBtn.addEventListener("click", () => this.addCondition());
     const runBtn = el("button", "primary", "Run query");
     runBtn.type = "button";
+    runBtn.title = "Search your contacts with the conditions above";
     runBtn.addEventListener("click", () => this.run());
     const clearBtn = el("button", null, "Clear");
     clearBtn.type = "button";
+    clearBtn.title = "Remove every condition and start a fresh query";
     clearBtn.addEventListener("click", () => { this.rows = []; this.condWrap.innerHTML = ""; this.addCondition(); this.renderResults(null); });
     const saveBtn = el("button", null, "Save query…");
     saveBtn.type = "button";
+    saveBtn.title = "Save these conditions under a name so you can rerun them later";
     saveBtn.addEventListener("click", () => this.saveQuery());
     controls.append(addBtn, runBtn, clearBtn, saveBtn);
     this.root.append(controls);
@@ -98,7 +105,15 @@ export class FindView {
     this.resultBar = el("div", "find-resultbar mono");
     this.root.append(this.resultBar);
     this.tableHead = el("div", "xp-row xp-head find-head");
-    for (const h of ["Name", "Organization", "Last", "Deg", "Tags"]) this.tableHead.append(el("div", "xp-cell", h));
+    const HEAD_TITLES = {
+      Last: "How long since the last logged interaction",
+      Deg: "Number of connections this contact has",
+    };
+    for (const h of ["Name", "Organization", "Last", "Deg", "Tags"]) {
+      const cell = el("div", "xp-cell", h);
+      if (HEAD_TITLES[h]) cell.title = HEAD_TITLES[h];
+      this.tableHead.append(cell);
+    }
     this.scroller = el("div", "xp-scroller find-scroller");
     this.sizer = el("div");
     this.rowsEl = el("div", "xp-rows");
@@ -113,11 +128,14 @@ export class FindView {
   addCondition(preset) {
     const row = el("div", "find-cond");
     const fieldSel = el("select", "find-field");
+    fieldSel.title = "Which contact field this condition tests";
     for (const f of FIELDS) fieldSel.append(new Option(f.label, f.key));
     const opSel = el("select", "find-op");
+    opSel.title = "How the field is compared. The options change with the field's type";
     const valWrap = el("span", "find-value");
     const customKey = el("input", "find-customkey");
     customKey.placeholder = "field name";
+    customKey.title = "The exact name of a custom field you added to contacts";
     customKey.hidden = true;
 
     const cond = { fieldSel, opSel, valWrap, customKey, row };
@@ -140,14 +158,17 @@ export class FindView {
         valWrap.append(a, el("span", "dim", "…"), b);
       } else if ((f.type === "enum" || (f.type === "list" && f.options))) {
         const sel = el("select");
+        sel.title = `The ${f.label.toLowerCase()} to match`;
         for (const o of f.options) sel.append(new Option(o, o));
         valWrap.append(sel);
       } else if (f.type === "number" || f.type === "date") {
         const inp = el("input", "find-num"); inp.type = "number";
         inp.placeholder = f.type === "date" ? "days" : "value";
+        inp.title = f.type === "date" ? "Number of days back from today" : `The ${f.label.toLowerCase()} to compare against`;
         valWrap.append(inp);
       } else {
         const inp = el("input"); inp.type = "text"; inp.placeholder = "value";
+        inp.title = `The text to match against ${f.label.toLowerCase()}`;
         valWrap.append(inp);
       }
     };
@@ -156,6 +177,8 @@ export class FindView {
 
     const rm = el("button", "find-rm", "✕");
     rm.type = "button";
+    rm.title = "Remove this condition";
+    rm.setAttribute("aria-label", "Remove this condition");
     rm.addEventListener("click", () => {
       row.remove();
       this.rows = this.rows.filter((r) => r !== cond);
@@ -217,6 +240,7 @@ export class FindView {
     if (resp.total) {
       const showBtn = el("button", "primary", "Show on graph");
       showBtn.type = "button";
+      showBtn.title = `Switch to the Network view with these ${resp.total.toLocaleString()} matches highlighted`;
       showBtn.addEventListener("click", () => this.handlers.onShowOnGraph(resp.matchedIds));
       this.resultBar.append(showBtn);
     }
@@ -237,6 +261,7 @@ export class FindView {
     for (let i = start; i < end; i++) {
       const r = results[i];
       const row = el("div", "xp-row find-row");
+      row.title = `Open ${r.name}`;
       const name = el("div", "xp-cell xp-name", `${r.starred ? "★ " : ""}${r.name}`);
       row.append(
         name,
@@ -306,9 +331,10 @@ export class FindView {
       for (const s of shown) {
         const row = el("button", "find-picker-row");
         row.type = "button";
+        row.title = `Load and run "${s.name}"`;
         row.append(el("span", null, s.name));
         const del = el("span", "find-picker-del mono", "✕");
-        del.title = "Delete query";
+        del.title = `Delete the saved query "${s.name}"`;
         del.addEventListener("click", async (e) => {
           e.stopPropagation();
           try {
