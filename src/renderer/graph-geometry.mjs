@@ -263,10 +263,16 @@ export function expandCouples(positions, units, centre, sides) {
 // recursively. Pure function so the wedge math is unit-testable; the caller
 // (graph-view) only applies the returned positions.
 
+const wrapTurn = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
 export const BALLOON_RING_GAP = 130;     // minimum graph units between depth rings
 export const BALLOON_NODE_PAD = 3.0;     // sibling spacing as a multiple of node size
 export const BALLOON_LANES = 2;          // seats deep: a ring is a lane, not a rope
-export const BALLOON_LANE_STEP = 56;     // graph units between the lanes of one ring
+// Half the ring gap, and that is a constraint rather than a taste: the step has
+// to be wide enough that the two lanes of a ring clear each other, and narrow
+// enough that the outer lane of one ring clears the inner lane of the next. At 56
+// the lanes were 27px apart on screen with a contact 22px across.
+export const BALLOON_LANE_STEP = 65;     // graph units between the lanes of one ring
 export const BALLOON_SEG_PAD = 0.16;     // clear sky between two relationship groups
 export const BALLOON_RING_MAX = 1.8;     // furthest a crowded wedge may push a ring past its seating radius
 export const BALLOON_EVEN = 0.45;        // how much wedge width is shared equally vs by size
@@ -278,16 +284,19 @@ export const BALLOON_EVEN = 0.45;        // how much wedge width is shared equal
  *   highest-degree node (ties break to the smallest id) so Mesh-less callers
  *   still get a stable root.
  * @param {{pairs?: [string, string][], rankOf?: (id: string) => number,
- *          coupleGap?: number}} [opts]
+ *          tieRank?: (a: string, b: string) => number, coupleGap?: number}} [opts]
  *   `pairs` are couples to keep side by side: each is laid out as one node and
  *   split along its ring afterwards, so the bond never stretches between two
  *   branches. `rankOf` orders the root's branches (the app ranks by tie type), so
- *   family, work and friends each own an arc of the circle.
+ *   family, work and friends each own an arc of the circle. `tieRank` ranks the
+ *   tie BETWEEN two contacts, which groups every other parent's people the same
+ *   way: a person's family sits together, their colleagues sit together.
  * @returns {Record<string, {x: number, y: number}>}
  */
 export function balloonLayout(allNodes, allEdges, rootId, opts = {}) {
   const pairs = opts.pairs ?? [];
   const rankOf = opts.rankOf ?? (() => 0);
+  const tieRank = opts.tieRank ?? null;
   /** @type {Record<string, {x: number, y: number}>} */
   const out = {};
   if (!allNodes.length) return out;
@@ -315,6 +324,20 @@ export function balloonLayout(allNodes, allEdges, rootId, opts = {}) {
   // relationship arcs. Ranking stops at the root: below it a branch keeps its own
   // shape, so a family is never torn apart by how its members know you.
   const sideOf = partnerSides(units, allEdges, unitOf);
+  // How closely two UNITS are tied, taken from the closest tie their members
+  // share. Couples hide the original endpoints, so this is worked out once here
+  // rather than asked of the caller per pair.
+  const between = new Map();
+  if (tieRank) {
+    for (const e of allEdges) {
+      const a = unitOf.get(String(e.source))?.id, b = unitOf.get(String(e.target))?.id;
+      if (a == null || b == null || a === b) continue;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const r = tieRank(String(e.source), String(e.target));
+      if (r != null) between.set(key, Math.min(between.get(key) ?? r, r));
+    }
+  }
+  const tieBetween = (a, b) => between.get(a < b ? `${a}|${b}` : `${b}|${a}`) ?? 0;
 
   const children = new Map();
   const parentOf = new Map();
@@ -322,12 +345,17 @@ export function balloonLayout(allNodes, allEdges, rootId, opts = {}) {
   const queue = [root];
   while (queue.length) {
     const u = queue.shift();
-    const kids = [...adj.get(u)].filter((v) => !depthOf.has(v)).sort();
+    let kids = [...adj.get(u)].filter((v) => !depthOf.has(v)).sort();
+    // Same kind of tie, same part of the wedge: a contact's family sits together
+    // and their colleagues sit together, so a run of one colour reads as one
+    // thing rather than as a scatter.
+    if (tieRank) kids.sort((a, b) => tieBetween(u, a) - tieBetween(u, b) || (a < b ? -1 : 1));
     // A couple is drawn as two people side by side, so its children are grouped
-    // by WHICH partner they belong to. Interleaved, half of them reach across to
-    // the far partner and every one of those lines crosses a sibling's.
+    // by WHICH partner they belong to FIRST. Interleaved, half of them reach
+    // across to the far partner and every one of those lines crosses a sibling's.
     const side = sideOf.get(u);
-    if (side) kids.sort((a, b) => (side.get(a) ?? 0) - (side.get(b) ?? 0) || (a < b ? -1 : 1));
+    if (side) kids = kids.map((k, i) => [k, i]).sort((x, y) =>
+      (side.get(x[0]) ?? 0) - (side.get(y[0]) ?? 0) || x[1] - y[1]).map(([k]) => k);
     if (u === root) {
       kids.sort((a, b) =>
         (side ? (side.get(a) ?? 0) - (side.get(b) ?? 0) : 0) ||
@@ -483,10 +511,65 @@ export function balloonLayout(allNodes, allEdges, rootId, opts = {}) {
     void d;
   }
 
-  for (const [id, d] of depthOf) {
-    const r = radius.get(d) + (lane.get(id) ?? 0) * BALLOON_LANE_STEP - (d ? BALLOON_LANE_STEP / 2 : 0);
-    const a = angle.get(id);
+  const seatRadius = (id) => {
+    const d = depthOf.get(id);
+    return radius.get(d) + (lane.get(id) ?? 0) * BALLOON_LANE_STEP - (d ? BALLOON_LANE_STEP / 2 : 0);
+  };
+  const seatAngle = new Map(angle);
+  const put = (id) => {
+    const r = seatRadius(id), a = seatAngle.get(id);
     out[id] = { x: r * Math.cos(a), y: r * Math.sin(a) };
+  };
+  for (const id of depthOf.keys()) put(id);
+
+  // A contact can come to rest ON a line it has nothing to do with: the wedges
+  // and rings are laid out from the tree, and nothing in that says a spoke
+  // running out to a branch may not pass exactly where an inner seat sits. Slide
+  // such a seat along its OWN ring until it is clear, never further than the free
+  // space to its neighbours there - so the ring, the lane and the wedge order all
+  // survive, and a contact only ever moves a few degrees.
+  {
+    const near = (id) => {
+      let worst = Infinity;
+      const p = out[id];
+      for (const e of edges) {
+        const a = e.source, b = e.target;
+        if (a === id || b === id || !out[a] || !out[b]) continue;
+        const ax = out[a].x, ay = out[a].y;
+        const vx = out[b].x - ax, vy = out[b].y - ay;
+        const len = vx * vx + vy * vy;
+        let t = len ? ((p.x - ax) * vx + (p.y - ay) * vy) / len : 0;
+        t = Math.max(0, Math.min(1, t));
+        worst = Math.min(worst, Math.hypot(p.x - (ax + t * vx), p.y - (ay + t * vy)));
+      }
+      return worst;
+    };
+    for (const [d, ids] of byDepth) {
+      if (!d) continue;
+      const ring = [...ids].sort((x, y) => seatAngle.get(x) - seatAngle.get(y));
+      ring.forEach((id, i) => {
+        const clear = width(id) / 2 + BALLOON_LANE_STEP / 8;
+        if (near(id) >= clear) return;
+        // Half the way to each neighbour on this ring, and no more.
+        const prev = ring[(i - 1 + ring.length) % ring.length], next = ring[(i + 1) % ring.length];
+        const back = ring.length < 2 ? 0.3 : Math.abs(wrapTurn(seatAngle.get(id) - seatAngle.get(prev))) / 2;
+        const fwd = ring.length < 2 ? 0.3 : Math.abs(wrapTurn(seatAngle.get(next) - seatAngle.get(id))) / 2;
+        const home = seatAngle.get(id);
+        let best = { at: home, clearance: near(id) };
+        for (let step = 1; step <= 4; step++) {
+          for (const room of [fwd * (step / 4), -back * (step / 4)]) {
+            seatAngle.set(id, home + room);
+            put(id);
+            const got = near(id);
+            if (got > best.clearance) best = { at: home + room, clearance: got };
+            if (got >= clear) break;
+          }
+          if (best.clearance >= clear) break;
+        }
+        seatAngle.set(id, best.at);
+        put(id);
+      });
+    }
   }
 
   // Anything unreachable from the root sits on one outermost ring, evenly
@@ -501,6 +584,57 @@ export function balloonLayout(allNodes, allEdges, rootId, opts = {}) {
   }
   // Split each couple along its own ring: partners share a depth and sit next to
   // each other, which is what the wedge was sized for.
-  return expandCouples(out, units, { x: 0, y: 0 }, sideOf);
+  const split = expandCouples(out, units, { x: 0, y: 0 }, sideOf);
+
+  // A pair is split after the easing above, so a partner can still come to rest
+  // on a line - the owner's own partner did, sitting 13px inside a spoke. Turn
+  // the PAIR about its middle until both are clear, rigidly and by a few degrees
+  // at most, so they stay adjacent, keep their heart, and stay on their ring.
+  for (const u of units) {
+    if (u.members.length !== 2) continue;
+    const [m0, m1] = u.members;
+    const mid = out[u.id];
+    if (!mid || !split[m0] || !split[m1]) continue;
+    const clearOf = (p, self) => {
+      let worst = Infinity;
+      for (const e of allEdges) {
+        const a = String(e.source), b = String(e.target);
+        // Only this partner's OWN lines are excused. The pair sits shoulder to
+        // shoulder, so the one thing most likely to be drawn over a partner is a
+        // line leaving the OTHER partner - which is exactly what happened to the
+        // owner's.
+        if (a === self || b === self) continue;
+        const pa = split[a], pb = split[b];
+        if (!pa || !pb) continue;
+        const vx = pb.x - pa.x, vy = pb.y - pa.y;
+        const len = vx * vx + vy * vy;
+        let t = len ? ((p.x - pa.x) * vx + (p.y - pa.y) * vy) / len : 0;
+        t = Math.max(0, Math.min(1, t));
+        worst = Math.min(worst, Math.hypot(p.x - (pa.x + t * vx), p.y - (pa.y + t * vy)));
+      }
+      return worst;
+    };
+    const turn = (by) => {
+      const c = Math.cos(by), sn = Math.sin(by);
+      return [m0, m1].map((m) => {
+        const dx = split[m].x - mid.x, dy = split[m].y - mid.y;
+        return { x: mid.x + dx * c - dy * sn, y: mid.y + dx * sn + dy * c };
+      });
+    };
+    const need = Math.max(width(u.id) / 6, BALLOON_LANE_STEP / 6);
+    const scoreOf = (ps) => Math.min(clearOf(ps[0], m0), clearOf(ps[1], m1));
+    let best = { by: 0, score: scoreOf([split[m0], split[m1]]) };
+    if (best.score >= need) continue;
+    for (const by of [0.15, -0.15, 0.3, -0.3, 0.45, -0.45]) {
+      const score = scoreOf(turn(by));
+      if (score > best.score) best = { by, score };
+      if (best.score >= need) break;
+    }
+    if (best.by) {
+      const [p0, p1] = turn(best.by);
+      split[m0] = p0; split[m1] = p1;
+    }
+  }
+  return split;
 }
 

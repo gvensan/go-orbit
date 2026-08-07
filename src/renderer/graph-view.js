@@ -1354,21 +1354,19 @@ export class GraphView {
     }
   }
 
-  /** Paint the relationship view: a contact, and every line inside their branch,
-   *  carries the colour of how you know that branch. The legend then reads as
-   *  "how you reach this part of your network" rather than "what this one tie
-   *  is", which is what makes a friend's whole family read as one thing. */
+  /** Paint the relationship view. A CONTACT wears the colour of how you reach
+   *  them, so a friend's family reads as part of your friend's world. A LINE
+   *  always names its own tie - a marriage inside that family is drawn as family,
+   *  whichever branch it sits in - so the legend keeps meaning one thing when you
+   *  look at a line. */
   applyRelationshipTint() {
     const centerStr = this.center != null ? String(this.center) : null;
     this.view.forEachNode((id) => {
       if (!this.full.hasNode(id)) return;
       this.view.setNodeAttribute(id, "color", this.nodeColor(id, this.full.getNodeAttributes(id), id === centerStr));
     });
-    this.view.forEachEdge((key, attrs, s, t) => {
-      const gate = s === centerStr ? this.view.getNodeAttribute(t, "gateway")
-        : t === centerStr ? this.view.getNodeAttribute(s, "gateway")
-          : this.view.getNodeAttribute(s, "gateway") ?? this.view.getNodeAttribute(t, "gateway");
-      this.view.setEdgeAttribute(key, "color", EDGE_COLORS[gate] ?? EDGE_COLORS[attrs.edgeType] ?? EDGE_DEFAULT);
+    this.view.forEachEdge((key, attrs) => {
+      this.view.setEdgeAttribute(key, "color", EDGE_COLORS[attrs.edgeType] ?? EDGE_DEFAULT);
     });
   }
 
@@ -1561,8 +1559,12 @@ export class GraphView {
     this.mode = "mesh";
     this.center = null;
     this.clearPath();
-    // Stable, deterministic order around the ring: ascending contact id.
-    const ordered = [...this.full.nodes()].sort((a, b) => Number(a) - Number(b));
+    // Grouped around the ring by what each contact mostly is to you (family,
+    // then work, then the looser ties), and by id inside a group - so the ring
+    // reads as blocks of one colour rather than a shuffle. Deterministic either
+    // way; this one is also legible.
+    const ordered = [...this.full.nodes()].sort((a, b) =>
+      this.dominantRank(a) - this.dominantRank(b) || Number(a) - Number(b));
     this.buildView(new Set(ordered), null, { layout: "circle" });
     this.fitCamera();
   }
@@ -1730,7 +1732,11 @@ export class GraphView {
     const queue = [root];
     while (queue.length) {
       const u = queue.shift();
-      for (const w of [...this.full.neighbors(u)].sort((a, b) => Number(a) - Number(b))) {
+      // Closest tie first, then by id: the wedges come out grouped by
+      // relationship instead of by whichever contact was created first.
+      const near = [...this.full.neighbors(u)].sort((a, b) =>
+        this.fullTieRank(u, a) - this.fullTieRank(u, b) || Number(a) - Number(b));
+      for (const w of near) {
         if (!depth.has(w)) {
           depth.set(w, depth.get(u) + 1);
           if (!children.has(u)) children.set(u, []);
@@ -3253,6 +3259,42 @@ export class GraphView {
     return pairs;
   }
 
+  /** The same, over the full graph, for the views that order their contacts
+   *  before the view is built. */
+  fullTieRank(a, b) {
+    let best = TIE_RANK.length;
+    if (!this.full) return best;
+    for (const key of this.full.edges(String(a), String(b))) {
+      const i = TIE_RANK.indexOf(this.full.getEdgeAttribute(key, "type"));
+      if (i >= 0 && i < best) best = i;
+    }
+    return best;
+  }
+
+  /** What a contact mostly is, as a rank: the closest tie type they hold with
+   *  anybody. Used to group contacts in views that have no centre to measure
+   *  from, like the Mesh ring. */
+  dominantRank(id) {
+    let best = TIE_RANK.length;
+    if (!this.full?.hasNode(String(id))) return best;
+    this.full.forEachEdge(String(id), (_k, a) => {
+      const i = TIE_RANK.indexOf(a.type);
+      if (i >= 0 && i < best) best = i;
+    });
+    return best;
+  }
+
+  /** How close the tie between two contacts is, as a rank, so a layout can keep
+   *  the same kind of tie together. Multi-edges take the closest one. */
+  tieRank(a, b) {
+    let best = TIE_RANK.length;
+    for (const key of this.view.edges(a, b)) {
+      const i = TIE_RANK.indexOf(this.view.getEdgeAttribute(key, "edgeType"));
+      if (i >= 0 && i < best) best = i;
+    }
+    return best;
+  }
+
   /** Each contact's tie to the centre, as a rank: the layout groups the circle by
    *  it, so family, work and friends each own an arc. Contacts further out have
    *  no tie to you and are ranked with their branch, never on their own. */
@@ -3290,6 +3332,7 @@ export class GraphView {
     this.applyPositions(balloonLayout(nodes, edges, this.center != null ? String(this.center) : null, {
       pairs: this.viewPairs(),
       rankOf: (id) => rank.get(id) ?? TIE_RANK.length,
+      tieRank: (a, b) => this.tieRank(a, b),
     }));
     this.fitCamera();
   }
@@ -3376,18 +3419,10 @@ export class GraphView {
     let count = 0;
     if (mode === "community") count = this.computeCommunities();
     if (this.mode === "cluster") return count; // super-nodes aren't contacts; keep community palette
-    if (mode === "relationship") {
-      this.applyRelationshipTint();
-    } else {
-      // Leaving the relationship view: lines go back to naming their own tie.
-      this.view.forEachNode((id) => {
-        const isCenter = this.center != null && Number(id) === this.center;
-        this.view.setNodeAttribute(id, "color", this.nodeColor(id, this.full.getNodeAttributes(id), isCenter));
-      });
-      this.view.forEachEdge((key, attrs) => {
-        this.view.setEdgeAttribute(key, "color", EDGE_COLORS[attrs.edgeType] ?? EDGE_DEFAULT);
-      });
-    }
+    this.view.forEachNode((id) => {
+      const isCenter = this.center != null && Number(id) === this.center;
+      this.view.setNodeAttribute(id, "color", this.nodeColor(id, this.full.getNodeAttributes(id), isCenter));
+    });
     this.sigma.refresh();
     return count;
   }
@@ -3405,17 +3440,11 @@ export class GraphView {
       if (attrs.relType) this.view.setNodeAttribute(id, "relColor", EDGE_COLORS[attrs.relType] ?? null);
     });
     if (this.mode !== "cluster") {
-      // The relationship view paints lines by their branch, so a palette switch
-      // has to go back through it rather than resetting them to their tie type.
-      if (this.colorMode === "relationship" && this.center != null) {
-        this.applyRelationshipTint();
-      } else {
-        this.view.forEachNode((id) => {
-          if (!this.full?.hasNode(id)) return; // super-nodes and synthetics keep their fill
-          const isCenter = this.center != null && Number(id) === this.center;
-          this.view.setNodeAttribute(id, "color", this.nodeColor(id, this.full.getNodeAttributes(id), isCenter));
-        });
-      }
+      this.view.forEachNode((id) => {
+        if (!this.full?.hasNode(id)) return; // super-nodes and synthetics keep their fill
+        const isCenter = this.center != null && Number(id) === this.center;
+        this.view.setNodeAttribute(id, "color", this.nodeColor(id, this.full.getNodeAttributes(id), isCenter));
+      });
     }
     this.sigma.refresh();
   }

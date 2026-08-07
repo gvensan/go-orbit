@@ -143,6 +143,42 @@ test("balloon: an only child stays in the inner lane, close to its parent", asyn
   assert.ok(reach <= outer + BALLOON_LANE_STEP, "its line is no longer than a crowded branch's");
 });
 
+test("balloon: every parent groups its people by the tie that connects them", async () => {
+  const { balloonLayout } = await geometry();
+  // One contact with six of their own: three family, three work, interleaved by
+  // id so only the tie can group them.
+  const kids = ["k0", "k1", "k2", "k3", "k4", "k5"];
+  const nodes = ["you", "head", ...kids].map((id) => N(id));
+  const edges = [E("you", "head"), ...kids.map((k) => E("head", k))];
+  const tie = (a, b) => {
+    const kid = a === "head" ? b : a;
+    return kids.includes(kid) ? Number(kid.slice(1)) % 2 : 0;   // 0 family, 1 work
+  };
+  const p = balloonLayout(nodes, edges, "you", { tieRank: tie });
+  const ang = (id) => Math.atan2(p[id].y - p.head.y, p[id].x - p.head.x);
+  const walk = [...kids].sort((a, b) => ang(a) - ang(b)).map((k) => Number(k.slice(1)) % 2);
+  let runs = 1;
+  for (let i = 1; i < walk.length; i++) if (walk[i] !== walk[i - 1]) runs++;
+  assert.ok(runs <= 2, `the two kinds sit in one run each, not interleaved (${walk.join("")})`);
+  assert.deepEqual(balloonLayout(nodes, edges, "you", { tieRank: tie }), p, "deterministic");
+});
+
+test("balloon: partner grouping still wins over tie grouping", async () => {
+  const { balloonLayout } = await geometry();
+  // A couple whose children are split between them; the tie ranks are arranged
+  // to pull the ordering the other way. Partner must decide, or the lines cross.
+  const nodes = ["you", "dad", "mum", "d0", "d1", "m0", "m1"].map((id) => N(id));
+  const edges = [E("you", "dad"), E("dad", "mum"),
+    E("dad", "d0"), E("dad", "d1"), E("mum", "m0"), E("mum", "m1")];
+  const tie = (a, b) => ((a + b).includes("0") ? 0 : 1);
+  const p = balloonLayout(nodes, edges, "you", { pairs: [["dad", "mum"]], tieRank: tie });
+  const mid = { x: (p.dad.x + p.mum.x) / 2, y: (p.dad.y + p.mum.y) / 2 };
+  const ang = (id) => Math.atan2(p[id].y - mid.y, p[id].x - mid.x);
+  const order = ["d0", "d1", "m0", "m1"].sort((a, b) => ang(a) - ang(b)).map((id) => id[0]);
+  const runs = order.filter((c, i) => i === 0 || c !== order[i - 1]).length;
+  assert.equal(runs, 2, `each partner's children stay together (${order.join("")})`);
+});
+
 // --- couple bonds ----------------------------------------------------------
 
 test("couples: the gap always leaves room for the heart", async () => {
@@ -222,4 +258,50 @@ test("balloon: a couple lands side by side instead of in two branches", async ()
   assert.ok(Math.abs(r("dad") - r("mum")) < 1e-9, "the couple shares a ring");
   for (const kid of ["d1", "d2", "m1", "m2"]) assert.ok(r(kid) > r("dad"), `${kid} sits beyond its parents`);
   assert.deepEqual(balloonLayout(nodes, edges, "you", { pairs: [["dad", "mum"]] }), paired, "still deterministic");
+});
+
+test("balloon: a contact is never left sitting on a line it has nothing to do with", async () => {
+  const { balloonLayout } = await geometry();
+  // A hub with a long spoke out to a far branch, and a ring of dead ends that
+  // the spoke has to pass through on its way.
+  const ring = Array.from({ length: 12 }, (_, i) => `r${String(i).padStart(2, "0")}`);
+  const nodes = ["you", "far", "far1", "far2", ...ring].map((id) => N(id));
+  const edges = [E("you", "far"), E("far", "far1"), E("far", "far2"), ...ring.map((r) => E("you", r))];
+  const p = balloonLayout(nodes, edges, "you");
+  const onLine = (id) => {
+    let worst = Infinity;
+    for (const e of edges) {
+      if (e.source === id || e.target === id) continue;
+      const a = p[e.source], b = p[e.target];
+      const vx = b.x - a.x, vy = b.y - a.y;
+      const len = vx * vx + vy * vy;
+      let t = len ? ((p[id].x - a.x) * vx + (p[id].y - a.y) * vy) / len : 0;
+      t = Math.max(0, Math.min(1, t));
+      worst = Math.min(worst, Math.hypot(p[id].x - (a.x + t * vx), p[id].y - (a.y + t * vy)));
+    }
+    return worst;
+  };
+  for (const id of ring) assert.ok(onLine(id) > 8, `${id} is clear of every line that is not its own (${onLine(id).toFixed(1)})`);
+});
+
+test("balloon: a couple turns as one to get clear, and stays a couple", async () => {
+  const { balloonLayout, COUPLE_GAP } = await geometry();
+  // The centre is a couple with spokes leaving in many directions, which is how
+  // a partner ends up drawn over their own partner's line.
+  const spokes = Array.from({ length: 10 }, (_, i) => `s${i}`);
+  const nodes = ["you", "mate", ...spokes].map((id) => N(id));
+  const edges = [E("you", "mate"), ...spokes.map((s) => E("you", s))];
+  const p = balloonLayout(nodes, edges, "you", { pairs: [["you", "mate"]] });
+  const apart = Math.hypot(p.you.x - p.mate.x, p.you.y - p.mate.y);
+  assert.ok(apart >= COUPLE_GAP, `partners stay side by side (${apart.toFixed(0)})`);
+  let worst = Infinity;
+  for (const s of spokes) {
+    const a = p.you, b = p[s];
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const len = vx * vx + vy * vy;
+    let t = len ? ((p.mate.x - a.x) * vx + (p.mate.y - a.y) * vy) / len : 0;
+    t = Math.max(0, Math.min(1, t));
+    worst = Math.min(worst, Math.hypot(p.mate.x - (a.x + t * vx), p.mate.y - (a.y + t * vy)));
+  }
+  assert.ok(worst > 4, `the partner is not sitting on one of your spokes (${worst.toFixed(1)})`);
 });

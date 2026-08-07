@@ -277,7 +277,9 @@ export class ExploreView {
 
   /** Dropdown to choose which columns the table shows. Persisted. */
   openColumnMenu(anchor) {
-    if (this._colMenu) { this._colMenu.remove(); this._colMenu = null; return; }
+    const mark = (open) => anchor?.setAttribute?.("aria-expanded", String(open));
+    if (this._colMenu) { this._colMenu.remove(); this._colMenu = null; mark(false); return; }
+    mark(true);
     const menu = el("div", "xp-col-menu");
     menu.append(el("div", "xp-col-menu-head mono", "Columns"));
     const grid = el("div", "xp-col-grid");
@@ -330,6 +332,7 @@ export class ExploreView {
       if (menu.contains(ev.target) || ev.target === anchor) return;
       menu.remove();
       this._colMenu = null;
+      mark(false);
       window.removeEventListener("mousedown", close, true);
     };
     setTimeout(() => window.addEventListener("mousedown", close, true), 0);
@@ -778,11 +781,16 @@ export class ExploreView {
       }
       row.addEventListener("click", (e) => {
         if (this.editMode) {
+          // A click mid-edit belongs to the editor: let it commit or cancel first.
+          if (this._editingCell) return;
           const cellEl = /** @type {HTMLElement|null} */ ((/** @type {HTMLElement} */ (e.target)).closest?.("[data-edit-key]"));
-          if (cellEl && !this._editingCell) this.beginCellEdit(cellEl, cellEl.dataset.editKey, r);
-          // Dead silence reads as "broken": say why nothing opened.
-          else if (!cellEl && !this._editingCell) toast("That column isn't editable. Turn off Edit to open the contact.");
-          return; // edit mode never navigates away mid-edit
+          // An editable column edits in place. A column that cannot be edited
+          // here still has somewhere to go: open the contact beside the table,
+          // which is what the click does with Edit off. Refusing it and
+          // explaining why was strictly less useful than doing the obvious thing.
+          if (cellEl) this.beginCellEdit(cellEl, cellEl.dataset.editKey, r);
+          else this.handlers.onOpenContact(r.id);
+          return;
         }
         this.handlers.onOpenContact(r.id);
       });
@@ -1040,6 +1048,19 @@ export class ExploreView {
       : `Nothing is selected, so the buttons here act on all ${scopeN.toLocaleString()} contacts matching the current filters`;
     this.bulk.append(scopeEl);
     const target = n ? `the ${n} selected contact${n === 1 ? "" : "s"}` : `all ${scopeN.toLocaleString()} contacts in view`;
+    /** An icon button: the glyph carries the meaning, the label carries it for
+     *  anyone not looking at it. Both are required - an icon with no name is a
+     *  guess for a screen reader and for a new user hovering. */
+    const iconBtn = (symbol, label, fn, title, cls = "") => {
+      const b = el("button", `xp-icon-btn ${cls}`.trim());
+      b.type = "button";
+      b.innerHTML = `<svg class="view-icon" aria-hidden="true"><use href="#${symbol}"/></svg>`;
+      b.setAttribute("aria-label", label);
+      b.title = title;
+      b.addEventListener("click", fn);
+      this.bulk.append(b);
+      return b;
+    };
     const btn = (text, cls, fn, title) => {
       const b = el("button", cls, text);
       b.type = "button";
@@ -1047,6 +1068,10 @@ export class ExploreView {
       b.addEventListener("click", fn);
       this.bulk.append(b);
     };
+    // Star and unstar are one binary offered both ways, so they sit together as
+    // a filled star and an outline of the same star.
+    iconBtn("ico-star", "Star", () => this.bulkStar(true), `Star ${target}`);
+    iconBtn("ico-star-off", "Remove star", () => this.bulkStar(false), `Remove the star from ${target}`);
     btn("Show on graph", "primary", () => this.handlers.onShowOnGraph(this.targetIds()),
       `Switch to the Network view with ${target} highlighted`);
     btn("Add tag…", null, () => this.bulkTag(), `Add one tag to ${target}`);
@@ -1057,8 +1082,6 @@ export class ExploreView {
     this.bulk.append(fieldBtn);
     btn("Set cadence…", null, () => this.bulkCadence(),
       `Set how often you mean to be in touch with ${target}`);
-    btn("Star", null, () => this.bulkStar(true), `Star ${target}`);
-    btn("Unstar", null, () => this.bulkStar(false), `Remove the star from ${target}`); // binary option, both ways
     btn("Save as segment…", null, () => this.saveSegment(),
       "Save the current filters under a name, so you can rerun them from the Segments list");
     if (n) {
@@ -1067,9 +1090,13 @@ export class ExploreView {
     }
     // Column chooser + edit mode, pushed to the right end of the toolbar.
     this.bulk.append(el("div", "xp-bulk-spacer"));
-    // The label states the MODE, not the action, so on/off is unmistakable.
-    const editBtn = el("button", "xp-edit-btn" + (this.editMode ? " active" : ""), this.editMode ? "✎ Editing on" : "✎ Edit");
+    // A pressed toggle, not a label that changes: the pencil stays put and the
+    // button itself shows whether editing is on, the way every other toggle in
+    // the app does.
+    const editBtn = el("button", "xp-icon-btn xp-edit-btn" + (this.editMode ? " active" : ""));
     editBtn.type = "button";
+    editBtn.innerHTML = '<svg class="view-icon" aria-hidden="true"><use href="#ico-edit"/></svg>';
+    editBtn.setAttribute("aria-label", "Edit cells");
     editBtn.setAttribute("aria-pressed", String(this.editMode));
     editBtn.title = this.editMode
       ? "Editing is ON: click any highlighted value to change it. Click here to go back to browsing."
@@ -1085,11 +1112,12 @@ export class ExploreView {
       this.renderBulk();
     });
     this.bulk.append(editBtn);
-    const colsBtn = el("button", "xp-cols-btn", "Columns ▾");
-    colsBtn.type = "button";
-    colsBtn.title = "Choose which columns the table shows. Your choice is remembered";
-    colsBtn.addEventListener("click", () => this.openColumnMenu(colsBtn));
-    this.bulk.append(colsBtn);
+    const colsBtn = iconBtn("ico-columns", "Columns", () => this.openColumnMenu(colsBtn),
+      "Choose which columns the table shows. Your choice is remembered", "xp-cols-btn");
+    colsBtn.setAttribute("aria-haspopup", "true");
+    // openColumnMenu keeps this honest; setting it here alone would go stale the
+    // moment the menu opened.
+    colsBtn.setAttribute("aria-expanded", "false");
   }
 
   async eachTarget(fn) {

@@ -940,6 +940,16 @@ button.ghost { background: transparent; }
 .bulk-field-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 /* Explore edit mode: the toggle lights up, editable cells invite a click, and
    the inline editor fills its cell without shifting the row height. */
+/* Toolbar icon buttons (star, unstar, columns, edit): square, quiet, and the
+   same size as each other so the right-hand cluster reads as one group. The
+   glyph carries the meaning on screen; every one of them also has an
+   aria-label, because an icon alone is a guess. */
+.xp-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex: none; padding: 0; line-height: 1;
+}
+.xp-icon-btn .view-icon { width: 17px; height: 17px; }   /* the rest is inherited from .view-icon */
+.xp-icon-btn:hover { color: var(--text); border-color: var(--faint); }
 .xp-edit-btn.active {
   background: var(--active); color: var(--text);
   border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);

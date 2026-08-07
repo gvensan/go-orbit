@@ -14,6 +14,58 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-08-06 - A contact is never left sitting on a line
+
+- The owner zoomed in on contacts that looked crammed, and correctly guessed the
+  cause was not contact-against-contact: it was a contact drawn ON a line. The
+  spacing checks had only ever compared node to node, so this went unmeasured.
+  On the owner's own graph, framed: **2 contacts drawn on an unrelated line and
+  12 more grazing one within 6px** - including their own partner, sitting 13px
+  inside a spoke leaving the owner.
+- Two surgical passes at the end of `balloonLayout`, neither of which touches the
+  rings, the lanes or the wedge order:
+  - **A seat slides along its own ring** until it is clear of any line it has
+    nothing to do with, never further than half the free space to its neighbours
+    on that ring. A contact moves a few degrees at most.
+  - **A couple turns as one** about its own middle, up to ~25 degrees, when
+    either partner is on a line. Rigid, so the pair stays adjacent and keeps its
+    heart. Couples are split AFTER the seat pass, which is why they need their
+    own: the pass cannot see where a partner will land. Each partner is tested
+    against the OTHER's lines - excusing both partners' lines is what hid the
+    owner's own case.
+- Result on that graph: **contacts on a line 2 -> 0**, grazing 12 -> 7, crossings
+  still 0, couples still 15-32px apart. One contact-to-contact overlap remains,
+  at -5px, where a wedge had to be squeezed.
+- `BALLOON_LANE_STEP` 56 -> 65, which is half the ring gap. That ratio is a
+  constraint, not a preference: wide enough that the two lanes of a ring clear
+  each other, narrow enough that one ring's outer lane clears the next ring's
+  inner lane. A relaxation pass that eased crowded seats apart within a lane was
+  built, measured, and dropped - it fought the line-clearance pass and cost a
+  crossing.
+
+## 2026-08-06 - A line names its own tie; contacts of a kind sit together
+
+- **Lines.** The relationship view briefly painted every line in its BRANCH's
+  colour, so a marriage inside a friend's family was drawn friend-green. Reverted
+  on the owner's call: a line always carries the colour of the tie it IS, in
+  every view. The contact keeps the branch colour (`gateway`), which is what made
+  a friend's family read as part of your friend's world in the first place - so
+  the fill answers "how do I know this person" and the line answers "what is this
+  tie", and the legend means one thing when you look at a line.
+- **Grouping.** Contacts of a kind now sit together wherever a view is free to
+  choose an order:
+  - **Graph** groups every parent's people by the tie that connects them
+    (`tieRank`), not only the root's. Partner grouping still wins where a couple
+    is involved, or their lines cross.
+  - **Mesh** orders the ring by what a contact mostly is (closest tie type they
+    hold with anybody), then by id - blocks of one colour instead of a shuffle.
+  - **Reach** walks each contact's neighbours closest-tie first, so a wedge holds
+    one kind of tie rather than a mix.
+  - **Clusters and Tree are deliberately untouched:** their groupings (community,
+    generation) are the point of those views.
+  - **Orbit is untouched too:** its wedges are communities, which is a different
+    axis from its rings and is what that view is for.
+
 ## 2026-08-06 - The Graph view is one deterministic layout; the force engine is gone
 
 - Graph now draws the radial tree and nothing else. The layout toggle, the
