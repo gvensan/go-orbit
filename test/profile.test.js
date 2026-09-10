@@ -13,11 +13,10 @@ test("profile defaults to empty, then backs a real starred contact", (t) => {
   assert.equal(meta.getOwnerContactId(db), null);
 
   const saved = meta.setProfile(db, { name: "  Giri  ", gender: "Male", email: "", role: "   " });
-  assert.deepEqual(saved, { name: "Giri", gender: "Male" }, "trims and drops blank fields");
-
   // It created an owner contact, starred, and app_meta points at it.
   const id = meta.getOwnerContactId(db);
   assert.ok(id, "owner.contactId not set");
+  assert.deepEqual(saved, { contactId: id, name: "Giri", gender: "Male" }, "trims and drops blank fields");
   const c = contacts.get(db, id);
   assert.equal(c.name, "Giri");
   assert.equal(c.starred, true);
@@ -34,10 +33,10 @@ test("updating the profile edits the same owner contact (no duplicate)", (t) => 
   // Only submitted keys are touched: the partial save must NOT eat email/phone
   // (the old delete-if-absent contract silently wiped stored fields whenever a
   // caller submitted partially - the "phone vanished from the owner card" bug).
-  assert.deepEqual(meta.getProfile(db), { name: "Giri V", gender: "Male", email: "g@example.com", phone: "+1 555" });
+  assert.deepEqual(meta.getProfile(db), { contactId: id1, name: "Giri V", gender: "Male", email: "g@example.com", phone: "+1 555" });
   // Clearing is explicit: an empty string removes the field.
   meta.setProfile(db, { email: "" });
-  assert.deepEqual(meta.getProfile(db), { name: "Giri V", gender: "Male", phone: "+1 555" });
+  assert.deepEqual(meta.getProfile(db), { contactId: id1, name: "Giri V", gender: "Male", phone: "+1 555" });
   assert.equal(contacts.list(db).length, 1, "should be exactly one contact");
 });
 

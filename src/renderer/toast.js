@@ -31,6 +31,9 @@ export function toast(message, { actionLabel, onAction, ttlMs = 6000 } = {}) {
 
 /** Map IpcError codes to the app-voice messages of APP_SHELL_UX §5. */
 export function toastError(err) {
+  // The bridge's own conditions (service offline, restarting, session gone,
+  // file too large) arrive already worded for the user.
+  if (err?.transport && err.message) return toast(err.message);
   const messages = {
     LOCKED: "Busy finishing a backup - one moment.",
     NOT_FOUND: "That contact is no longer available.",

@@ -1,0 +1,315 @@
+#!/bin/bash
+# orbit: control the Orbit service (a launchd login agent on macOS, or a
+# foreground process anywhere Node 24 runs).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGENTS="$HOME/Library/LaunchAgents"
+DOMAIN="gui/$(id -u 2>/dev/null || echo 0)"
+NODE_LINK="$ROOT/bin/node"
+ORBIT_HOME="${ORBIT_HOME:-$HOME/.orbit}"
+MIN_NODE=24
+REPO="${ORBIT_REPO:-gvensan/my-orbit}"
+BRANCH="${ORBIT_BRANCH:-main}"
+TARBALL="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
+
+red() { printf '\033[31m%s\033[0m\n' "$*"; }
+green() { printf '\033[32m%s\033[0m\n' "$*"; }
+dim() { printf '\033[2m%s\033[0m\n' "$*"; }
+
+node_major() { "$1" --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p'; }
+
+find_node() {
+  # Order: bin/node link, nvm default alias, newest nvm node, Volta, Homebrew, PATH. Must be >= MIN_NODE.
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}" cand=() alias v
+  [ -x "$NODE_LINK" ] && cand+=("$NODE_LINK")
+  if [ -f "$nvm_dir/alias/default" ]; then
+    alias="$(cat "$nvm_dir/alias/default")"
+    v="$(ls "$nvm_dir/versions/node" 2>/dev/null | grep -E "^v?${alias#v}" | sort -V | tail -1 || true)"
+    [ -n "$v" ] && cand+=("$nvm_dir/versions/node/$v/bin/node")
+  fi
+  if [ -d "$nvm_dir/versions/node" ]; then
+    for v in $(ls "$nvm_dir/versions/node" | sort -Vr); do cand+=("$nvm_dir/versions/node/$v/bin/node"); done
+  fi
+  cand+=("$HOME/.volta/bin/node" "/opt/homebrew/bin/node" "/usr/local/bin/node")
+  if command -v node >/dev/null 2>&1; then cand+=("$(command -v node)"); fi
+  local c m
+  for c in "${cand[@]}"; do
+    [ -x "$c" ] || continue
+    m="$(node_major "$c")"
+    if [ -n "$m" ] && [ "$m" -ge "$MIN_NODE" ]; then echo "$c"; return; fi
+  done
+  red "Node $MIN_NODE or newer was not found."
+  cat >&2 <<MSG
+Orbit needs Node.js 24 LTS. The easiest way to get it:
+  1. Open https://nodejs.org and click the "Download Node.js (LTS)" button.
+  2. Open the downloaded .pkg and click through the installer.
+  3. Run this command again.
+Developers can use nvm (nvm install 24) or Homebrew (brew install node@24) instead.
+MSG
+  exit 1
+}
+
+usage() {
+  cat <<USAGE
+usage: bin/orbit <command>
+  install                 set up the login agent (macOS): node link, build, launchd
+  uninstall               remove the agent; your data stays in $ORBIT_HOME
+  start | stop | restart  control the service (restart is graceful: final backup, then a fresh process)
+  status                  pid, health, data location
+  open                    open the web UI in your browser (unlocks it with your session)
+  doctor                  check node, agent, port, database, backups
+  update                  get the latest code (git pull, or a download when installed from a zip), rebuild, restart
+  reset-session           forget the browser session token (all browsers need bin/orbit open again)
+  logs [n]                follow the service log
+  run                     run the service in the foreground (any OS)
+  build                   rebuild the web UI
+  node                    refresh bin/node after a node upgrade
+
+Environment: ORBIT_HOME (data folder, default ~/.orbit), ORBIT_PORT (default from src/main/config.js).
+USAGE
+}
+
+TOKEN_FILE="$ORBIT_HOME/session-token"
+
+# Commands that need no Node at all.
+case "${1:-}" in
+  ""|help|-h|--help) usage; exit 0 ;;
+  logs) mkdir -p "$ORBIT_HOME/logs"; touch "$ORBIT_HOME/logs/orbit.log"; exec tail -n "${2:-40}" -f "$ORBIT_HOME/logs/orbit.log" ;;
+esac
+
+NODE="$(find_node)"
+# npm lives beside the REAL node binary; bin/node is a symlink, so resolve through Node itself.
+NODE_BIN_DIR="$("$NODE" -p 'require("path").dirname(process.execPath)')"
+npm_run() { (cd "$ROOT" && "$NODE" "$NODE_BIN_DIR/npm" "$@"); }
+
+# The port and the agent label live in src/main/config.js (server.port, server.launchdLabel); ORBIT_PORT overrides the port.
+config_port() { "$NODE" -p 'require(process.argv[1] + "/src/main/config").server.port' "$ROOT" 2>/dev/null || echo 7779; }
+config_label() { "$NODE" -p 'require(process.argv[1] + "/src/main/config").server.launchdLabel' "$ROOT" 2>/dev/null || echo dev.orbit; }
+PORT="${ORBIT_PORT:-$(config_port)}"
+LABEL="$(config_label)"
+PLIST="$AGENTS/$LABEL.plist"
+BASE="http://localhost:$PORT"
+
+token() { [ -f "$TOKEN_FILE" ] && tr -d '\n' < "$TOKEN_FILE" || true; }
+
+link_node() {
+  ln -sfn "$NODE" "$NODE_LINK"
+  echo "bin/node -> $NODE ($("$NODE_LINK" --version))"
+}
+
+ensure_deps() {
+  if [ ! -d "$ROOT/node_modules" ]; then
+    echo "installing dependencies"
+    npm_run install --no-audit --no-fund
+  fi
+}
+
+ensure_built() {
+  ensure_deps
+  if [ ! -f "$ROOT/dist/renderer/index.html" ]; then
+    echo "building the web UI"
+    npm_run run build
+  fi
+}
+
+# Escape a value for the sed replacement side (paths may contain & | or backslashes).
+esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+
+render() {
+  # render <template> <out>
+  mkdir -p "$AGENTS" "$ORBIT_HOME/logs"
+  sed -e "s|__ROOT__|$(esc "$ROOT")|g" -e "s|__LABEL__|$(esc "$LABEL")|g" -e "s|__HOME__|$(esc "$HOME")|g" \
+      -e "s|__PORT__|$(esc "$PORT")|g" -e "s|__ORBIT_HOME__|$(esc "$ORBIT_HOME")|g" "$1" > "$2"
+  plutil -lint "$2" >/dev/null || { red "could not write a valid launchd plist for $ROOT"; exit 1; }
+}
+
+is_mac() { [ "$(uname)" = "Darwin" ]; }
+loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
+bootout_quiet() { if loaded "$1"; then launchctl bootout "$DOMAIN/$1" 2>/dev/null || true; sleep 0.5; fi; }
+need_mac() { is_mac || { red "The login agent is macOS only. On other systems run: bin/orbit run (or npm start) under your own supervisor."; exit 1; }; }
+
+do_install() {
+  need_mac
+  link_node
+  ensure_built
+  render "$ROOT/launchd/$LABEL.plist.tmpl" "$PLIST"
+  bootout_quiet "$LABEL"
+  launchctl bootstrap "$DOMAIN" "$PLIST"
+  launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
+  green "service installed and started (runs at every login)"
+  sleep 1.5
+  do_status
+}
+
+do_uninstall() {
+  need_mac
+  bootout_quiet "$LABEL"
+  rm -f "$PLIST"
+  green "uninstalled. Your contacts, backups and settings are untouched in $ORBIT_HOME"
+}
+
+do_start() {
+  need_mac
+  [ -f "$PLIST" ] || { echo "not installed, run: bin/orbit install"; exit 1; }
+  if loaded "$LABEL"; then launchctl kickstart "$DOMAIN/$LABEL"; else launchctl bootstrap "$DOMAIN" "$PLIST"; fi
+  sleep 1.5
+  do_status
+}
+
+do_stop() {
+  need_mac
+  if loaded "$LABEL"; then launchctl bootout "$DOMAIN/$LABEL"; echo "stopped (stays down until login or bin/orbit start)"; else echo "not running"; fi
+}
+
+agent_pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | sed -n 's/^[[:space:]]*pid = \([0-9]*\).*/\1/p' | head -1; }
+
+# Graceful: SIGTERM lets the service take its final backup and checkpoint the
+# WAL (kickstart -k would SIGKILL it). Exit 0 keeps launchd from auto-restarting,
+# so we kickstart once the old pid is gone.
+do_restart() {
+  need_mac
+  if ! loaded "$LABEL"; then do_start; return; fi
+  local pid; pid="$(agent_pid)"
+  if [ -n "$pid" ]; then
+    launchctl kill TERM "$DOMAIN/$LABEL" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    local i=0
+    while [ "$i" -lt 40 ] && kill -0 "$pid" 2>/dev/null; do sleep 0.25; i=$((i+1)); done
+    kill -0 "$pid" 2>/dev/null && { dim "service did not exit in 10s; forcing"; launchctl kickstart -k "$DOMAIN/$LABEL"; sleep 1.5; do_status; return; }
+  fi
+  launchctl kickstart "$DOMAIN/$LABEL"
+  sleep 1.5
+  do_status
+}
+
+do_status() {
+  if is_mac; then
+    if loaded "$LABEL"; then
+      local info pid exitcode
+      info="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null || true)"
+      pid="$(echo "$info" | sed -n 's/^[[:space:]]*pid = \([0-9]*\).*/\1/p' | head -1)"
+      exitcode="$(echo "$info" | sed -n 's/^[[:space:]]*last exit code = \(.*\)$/\1/p' | head -1)"
+      echo "service:  loaded, pid ${pid:-none}, last exit ${exitcode:-n/a}"
+    else
+      echo "service:  not loaded (bin/orbit install, or bin/orbit run for the foreground)"
+    fi
+  fi
+  echo "url:      $BASE"
+  local health
+  if health="$(curl -fsS --max-time 2 "$BASE/api/health" 2>/dev/null)"; then
+    echo "health:   $health"
+    case "$health" in *'"restartNeeded":true'*) dim "code changed since start: run bin/orbit restart";; esac
+  else
+    echo "health:   no response"
+    if is_mac && loaded "$LABEL" && [ -z "$(agent_pid)" ]; then
+      dim "the service exited (a boot failure stays down rather than looping): bin/orbit logs shows why, bin/orbit start retries"
+    fi
+  fi
+  echo "data:     $ORBIT_HOME"
+}
+
+do_open() {
+  local t; t="$(token)"
+  if [ -z "$t" ]; then
+    red "no session token yet: the service has not started. Run bin/orbit start (or bin/orbit run) first."
+    exit 1
+  fi
+  local url="$BASE/?token=$t"
+  echo "$url"
+  if is_mac; then open "$url"; elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url"; fi
+}
+
+do_doctor() {
+  echo "Orbit doctor"
+  echo "-------------------"
+  green "ok   node: $NODE ($("$NODE" --version))"
+  if [ -f "$ROOT/dist/renderer/index.html" ]; then green "ok   web UI built"; else red "FAIL web UI not built: run npm run build"; fi
+  if is_mac; then
+    if [ -f "$PLIST" ]; then green "ok   agent plist: $PLIST"; else dim "     agent not installed (bin/orbit install); foreground use is fine"; fi
+    if loaded "$LABEL"; then green "ok   agent loaded"; else dim "     agent not loaded"; fi
+  fi
+  if ! curl -fsS --max-time 3 "$BASE/api/health" >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      red "FAIL port $PORT is used by another process: $(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN | tail -1 | awk '{print $1, $2}')"
+    else
+      red "FAIL service not responding on $BASE (see bin/orbit logs)"
+    fi
+    return 1
+  fi
+  green "ok   service answers on $BASE"
+  local t; t="$(token)"
+  [ -n "$t" ] || { red "FAIL no session token in $TOKEN_FILE"; return 1; }
+  # The token travels in a header file, never on the command line (ps would show it).
+  local hdr; hdr="$(mktemp)"; chmod 600 "$hdr"; printf 'Authorization: Bearer %s\n' "$t" > "$hdr"
+  trap 'rm -f "$hdr"' RETURN
+  curl -fsS --max-time 30 -H "@$hdr" "$BASE/api/doctor" | "$NODE" -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      const r=JSON.parse(s);
+      for (const c of r.checks) {
+        const tag = c.ok===true ? "\x1b[32mok  \x1b[0m" : c.ok===false ? "\x1b[31mFAIL\x1b[0m" : "\x1b[33mskip\x1b[0m";
+        console.log(`${tag} ${c.label}${c.detail ? ": " + c.detail : ""}`);
+        if (c.ok===false && c.fix) console.log(`     fix: ${c.fix}`);
+      }
+      if (r.restartNeeded) console.log("\x1b[33mnote\x1b[0m code changed since the service started: run bin/orbit restart");
+    })'
+}
+
+# Copy a fresh checkout or unpacked tarball over ROOT, keeping the installed
+# dependencies, the built UI and the node link (they are rebuilt right after).
+# Your data is never here: it lives in ORBIT_HOME.
+# copy_code <source dir>
+copy_code() {
+  local src="$1" name f
+  [ -f "$src/src/server/server.js" ] || { red "no Orbit code found in $src"; exit 1; }
+  for f in "$src"/* "$src"/.[!.]*; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f")"
+    case "$name" in node_modules|dist|.git|.DS_Store) continue ;; esac
+    rm -rf "$ROOT/$name"
+    cp -R "$f" "$ROOT/$name"
+  done
+  chmod +x "$ROOT/bin/orbit" "$ROOT/install.sh" "$ROOT/uninstall.sh" 2>/dev/null || true
+}
+
+# Download the latest code without git (for installs made from a zip or the one-line installer).
+download_update() {
+  local tmp; tmp="$(mktemp -d)"
+  echo "downloading $TARBALL"
+  curl -fsSL "$TARBALL" | tar -xz -C "$tmp" || { red "download failed"; rm -rf "$tmp"; exit 1; }
+  local src; src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  copy_code "$src"
+  rm -rf "$tmp"
+  green "code updated in $ROOT (your data in $ORBIT_HOME was kept)"
+}
+
+do_update() {
+  if [ -d "$ROOT/.git" ]; then
+    (cd "$ROOT" && git pull --ff-only) || { red "git pull failed; resolve and re-run"; exit 1; }
+  else
+    download_update
+  fi
+  link_node
+  npm_run install --no-audit --no-fund && npm_run run build
+  if is_mac && [ -f "$PLIST" ]; then do_restart; else green "updated; restart the service to apply"; fi
+}
+
+case "${1:-}" in
+  install) do_install ;;
+  uninstall) do_uninstall ;;
+  start) do_start ;;
+  stop) do_stop ;;
+  restart) do_restart ;;
+  status) do_status ;;
+  doctor) do_doctor ;;
+  update) do_update ;;
+  update-from) copy_code "${2:?source folder}" ;;
+  reset-session)
+    rm -f "$TOKEN_FILE"
+    echo "session token removed; every browser must be re-opened with bin/orbit open"
+    if is_mac && loaded "$LABEL"; then do_restart; else echo "restart the service to mint a new token"; fi ;;
+  open) do_open ;;
+  build) ensure_deps; npm_run run build ;;
+  run) ensure_built; ORBIT_HOME="$ORBIT_HOME" ORBIT_PORT="$PORT" exec "$NODE" "$ROOT/src/server/server.js" ;;
+  node) link_node ;;
+  *) usage; exit 1 ;;
+esac

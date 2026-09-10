@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- Must match config.security.csp exactly; enforced by test/ipc-contract.test.js -->
+  <!-- Must match config.security.csp exactly (also sent as a header); enforced by test/ipc-contract.test.js -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'" />
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" />
   <title>Orbit</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -144,6 +145,9 @@
     <symbol id="nav-settings" viewBox="0 0 24 24">
       <path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h2M10 18h10"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="18" r="2"/>
     </symbol>
+    <symbol id="nav-setup" viewBox="0 0 24 24">
+      <rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12.5l2.5 2.5L16 9.5"/>
+    </symbol>
     <symbol id="nav-keyboard" viewBox="0 0 24 24">
       <rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 14h.01M17 14h.01M10 14h4"/>
     </symbol>
@@ -202,6 +206,7 @@
       <button type="button" class="nav-item" data-nav="trash" title="Trash: restore deleted contacts, or remove them for good"><svg class="nav-icon" aria-hidden="true"><use href="#nav-trash"/></svg><span>Trash</span></button>
       <div class="nav-spacer"></div>
       <div class="nav-divider" role="separator"></div>
+      <button type="button" class="nav-item" id="nav-setup" data-nav="setup" hidden title="Setup checklist: the one-time steps that make Orbit yours"><svg class="nav-icon" aria-hidden="true"><use href="#nav-setup"/></svg><span>Setup</span><b id="setup-badge" class="nav-badge" title="Steps still to do"></b></button>
       <button type="button" class="nav-item" data-nav="settings" data-shortcut-title="Settings|," title="Settings (Cmd/Ctrl+,)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-settings"/></svg><span>Settings</span><b id="update-dot" class="nav-dot" hidden></b></button>
       <button type="button" class="nav-item" data-nav="shortcuts" title="Keyboard shortcuts (?)"><svg class="nav-icon" aria-hidden="true"><use href="#nav-keyboard"/></svg><span>Shortcuts</span></button>
       <button type="button" class="nav-item" id="nav-collapse" title="Collapse sidebar" aria-label="Collapse sidebar"><svg class="nav-icon" aria-hidden="true"><use href="#nav-panel-close"/></svg><span>Collapse</span></button>

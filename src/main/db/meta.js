@@ -42,7 +42,7 @@ function getProfile(db) {
   const c = contacts.get(db, id);
   if (!c) return {};
   /** @type {import('../../shared/types').OwnerProfile} */
-  const p = { name: c.name };
+  const p = { contactId: id, name: c.name };
   for (const f of PROFILE_FIELDS) if (c.fields[f]) p[f] = c.fields[f];
   return p;
 }

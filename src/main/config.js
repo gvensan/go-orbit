@@ -1,9 +1,33 @@
 // config.js — the ONE place tunables live. Never hardcode these elsewhere.
 
 module.exports = {
+  // The service: a Node HTTP server bound to loopback, one per data home.
+  server: {
+    host: "127.0.0.1",          // never configurable; the app is single-machine by design
+    port: 7779,
+    portEnv: "ORBIT_PORT",      // overrides port (the launchd agent sets it)
+    homeEnv: "ORBIT_HOME",      // overrides the data home
+    homeDirName: ".orbit",      // default data home under the user's home directory
+    sessionCookie: "orbit_session",
+    sessionMaxAgeDays: 365,        // cookie lifetime; the token itself never expires (bin/orbit reset-session rotates it)
+    // Covers the largest legitimate bodies: a 64 MB import upload and the base64
+    // PNG export payload (limits.imageMaxBytes * 4/3).
+    bodyMaxBytes: 80 * 1024 * 1024,
+    uploadTtlMs: 60 * 60 * 1000,   // an idle import upload lingers at most this long (refreshed on every read)
+    exportTtlMs: 60 * 60 * 1000,   // an export waits at most this long to be downloaded
+    restartExitCode: 3,            // non-zero so launchd (KeepAlive on failure) restarts us
+    bootFailureExitCode: 0,        // a boot failure stays down (no 5-second crash loop); doctor and logs say why
+    restartDrainMs: 10 * 1000,     // wait for in-flight requests before a restart, at most this long
+    localHosts: ["localhost", "127.0.0.1", "[::1]", "::1"],
+    launchdLabel: "dev.orbit",     // the macOS login agent (bin/orbit reads it too)
+    logMaxBytes: 5 * 1024 * 1024,  // orbit.log rotates to orbit.log.1 past this
+    livenessPollMs: 5 * 1000,      // browser polls /api/health (cheap, unauthenticated) at this rate
+    statusPollMs: 30 * 1000,       // browser polls update:status at this rate
+    restartPollMs: 500,            // browser polls health while the service restarts
+    restartWaitMaxMs: 30 * 1000,   // give up waiting for a restart after this
+  },
+
   window: {
-    width: 1200,
-    height: 800,
     minWidth: 900,   // below this the two-column layout breaks (see APP_SHELL_UX)
     minHeight: 600,
   },
@@ -112,11 +136,11 @@ module.exports = {
   },
 
   security: {
-    // Renderer hardening — asserted at window creation.
-    contextIsolation: true,
-    sandbox: true,
-    nodeIntegration: false,
-    csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'",
+    // Sent as a response header on every page and asserted equal to the meta tag
+    // in index.html by test/ipc-contract.test.js. connect-src 'self' is the one
+    // relaxation from the desktop build: the UI must reach its own service. It
+    // still cannot reach any other origin; tiles and geocoding are proxied.
+    csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
   },
 
   sample: {
@@ -128,7 +152,7 @@ module.exports = {
 
   // Online location autocomplete and detailed maps. Enabled by default; the
   // user can explicitly disable both with one preference. Fetches happen in the
-  // MAIN process so the renderer keeps connect-src 'none'. OpenStreetMap Photon:
+  // SERVICE so the browser never talks to a third party. OpenStreetMap Photon:
   // free, no API key, built for as-you-type city search.
   location: {
     onlineDefault: true,
@@ -140,9 +164,9 @@ module.exports = {
     backfillDelayMs: 200,   // pause between online geocode calls
   },
 
-  // Online map tiles ride the same "location.online" preference. Fetched
-  // in the MAIN process and handed to the renderer as data: URLs, so the renderer
-  // keeps connect-src 'none'. Cached on disk to be polite to OSM's tile servers
+  // Online map tiles ride the same "location.online" preference. Fetched by
+  // the service and handed to the browser as data: URLs, so the page's CSP
+  // stays 'self'-only. Cached on disk to be polite to OSM's tile servers
   // and to keep pan/zoom snappy offline once tiles are seen.
   map: {
     // CARTO basemaps (OpenStreetMap-derived), light + dark so the map follows
@@ -163,14 +187,23 @@ module.exports = {
     timeoutMs: 6000,
   },
 
-  dev: {
-    reloadDebounceMs: 150,      // window reload settle time in dev:watch mode
+  // The "Add to Orbit" bookmarklet (Settings > Setup): what it carries and where it lands.
+  bookmarklet: {
+    selectionMax: 2000,     // characters of selected page text passed along as notes
+    windowName: "orbit",    // the app names its window this, so the bookmarklet can reuse a tab it opened
+    matchMin: 0.86,         // a candidate at or above this asks "already have them?" first
   },
 
+  dev: {
+    reloadDebounceMs: 150,      // dev:watch settle time between a rebuild and a restart
+  },
+
+  // "Updates" in the service model mean: newer code is on disk (bin/orbit
+  // update, or a git pull) and the running process has not restarted yet.
   update: {
     enabled: true,
-    // GitHub Releases feed is wired in electron-builder.yml (publish).
-    intervalMs: 6 * 60 * 60 * 1000,
-    backupBeforeApply: true,
+    codeChangeGraceMs: 2000,    // ignore mtimes this close to process start
+    codeChangeCacheMs: 2000,    // stat the source tree at most this often (every tab polls health)
+    backupBeforeApply: true,    // verified snapshot before a restart applies new code
   },
 };

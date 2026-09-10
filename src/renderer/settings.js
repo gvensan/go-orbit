@@ -398,6 +398,130 @@ function appearanceSection(parent, onPaletteChanged) {
  *  @param {{ onChanged?: () => void, onOpenContact?: (id: number) => void,
  *            onOpenDedup?: () => void, onShowOnGraph?: (ids: number[]) => void,
  *            goTab?: (id: string) => void }} opts */
+/**
+ * Settings > Setup: the checklist. Auto-checked steps show the service's own
+ * view of the world; the two judgement steps take a "Mark done". Every open
+ * step carries the action that completes it.
+ * @param {HTMLElement} parent
+ * @param {import("../shared/types").SetupStatus} s
+ * @param {{ goTab: (id: string, focusTab?: boolean) => void, onImport: () => void, onOpenPalette?: () => void,
+ *           onBackupNow?: () => void | Promise<void>, onChanged: () => void }} opts
+ */
+function setupSection(parent, s, { goTab, onImport, onOpenPalette, onBackupNow, onChanged }) {
+  const sec = section(parent, "Setup checklist");
+  const intro = el("p", "dim",
+    "Four short steps and a few optional ones. Orbit works without the optional ones; each makes it more yours. " +
+    "Steps that Orbit can see for itself tick on their own; mark the judgement calls done when you have decided.");
+  if (s.complete) intro.append(" ", el("b", null, "All required steps are done."), " This checklist has left the sidebar and stays here under Settings.");
+  sec.append(intro);
+
+  const progress = el("div", "setup-progress");
+  progress.setAttribute("role", "status");
+  progress.append(
+    el("span", "setup-progress-text", `${s.requiredDone} of ${s.requiredTotal} required steps done`),
+    el("span", "dim", s.remaining ? ` · ${s.remaining} to go in total` : " · nothing left to do"),
+  );
+  const bar = el("div", "setup-progress-bar");
+  const fill = el("div", "setup-progress-fill");
+  fill.style.width = `${Math.round((s.requiredDone / Math.max(1, s.requiredTotal)) * 100)}%`;
+  bar.append(fill);
+  const recheck = el("button", null, "Re-check");
+  recheck.type = "button";
+  recheck.title = "Ask Orbit to look again at every step that checks itself";
+  recheck.addEventListener("click", () => onChanged());
+  const head = el("div", "card-actions setup-head");
+  head.append(progress, recheck);
+  sec.append(head, bar);
+
+  const list = el("ol", "setup-steps");
+  for (const step of s.steps) {
+    const li = el("li", `setup-step${step.done ? " done" : ""}${step.required ? "" : " optional"}`);
+    const mark = el("span", "setup-mark", step.done ? "✓" : "");
+    mark.setAttribute("aria-label", step.done ? "done" : "to do");
+    const headRow = el("div", "setup-step-head");
+    const title = el("h4", null, step.title);
+    if (!step.required) title.append(" ", el("span", "setup-opt", "optional"));
+    headRow.append(mark, title);
+    if (step.manual) {
+      const toggle = el("button", "ghost", step.done ? "Undo" : "Mark done");
+      toggle.type = "button";
+      toggle.title = step.done ? "Put this step back on the list" : "Record that you have dealt with this step";
+      toggle.addEventListener("click", async () => {
+        toggle.disabled = true;
+        try {
+          await api().setup.mark({ id: step.id, done: !step.done });
+          onChanged();
+        } catch (err) {
+          toggle.disabled = false;
+          toastError(err);
+        }
+      });
+      headRow.append(toggle);
+    }
+    const body = el("div", "setup-step-body");
+    body.append(el("p", null, step.detail));
+    if (step.hint) body.append(el("p", "field-hint dim", step.hint));
+    if (step.actions.length) {
+      const actions = el("div", "card-actions");
+      for (const a of step.actions) {
+        const btn = el("button", a.kind === "copy" ? null : "primary", a.label);
+        btn.type = "button";
+        if (a.kind === "copy") {
+          const code = el("code", "mono", a.value);
+          code.title = a.value;
+          actions.append(code);
+          btn.title = `Copy "${a.value}" to the clipboard`;
+          btn.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(a.value);
+              toast("Copied.");
+            } catch {
+              toast("Could not reach the clipboard; select the text and copy it by hand.");
+            }
+          });
+        } else if (a.kind === "tab") {
+          btn.title = "Jump to that Settings tab";
+          btn.addEventListener("click", () => goTab(a.value, true));
+        } else if (a.kind === "import") {
+          btn.title = "Open the import wizard (vCard, CSV, or Orbit archive)";
+          btn.addEventListener("click", () => onImport());
+        } else if (a.kind === "backup") {
+          btn.title = "Take a verified snapshot of your data now";
+          btn.addEventListener("click", async () => { await onBackupNow?.(); onChanged(); });
+        } else if (a.kind === "palette") {
+          btn.title = "Open the search palette and type a name to add someone";
+          btn.addEventListener("click", () => onOpenPalette?.());
+        } else if (a.kind === "bookmarklet") {
+          // A real link so it can be dragged to the bookmarks bar; clicking it here
+          // is refused by the CSP anyway, so explain instead of doing nothing.
+          const link = /** @type {HTMLAnchorElement} */ (el("a", "bookmarklet", a.label));
+          link.href = a.value;
+          link.draggable = true;
+          link.title = "Drag this button to your bookmarks bar. Clicking it here does nothing; it works on other pages";
+          link.addEventListener("click", (e) => {
+            e.preventDefault();
+            toast("Drag the button to your bookmarks bar, then use it on any web page.");
+          });
+          const copyBtn = el("button", null, "Copy code");
+          copyBtn.type = "button";
+          copyBtn.title = "Copy the bookmark's address, for adding a bookmark by hand";
+          copyBtn.addEventListener("click", async () => {
+            try { await navigator.clipboard.writeText(a.value); toast("Copied. Add a bookmark and paste this as its address."); }
+            catch { toast("Could not reach the clipboard."); }
+          });
+          actions.append(link, copyBtn);
+          continue;
+        }
+        actions.append(btn);
+      }
+      body.append(actions);
+    }
+    li.append(headRow, body);
+    list.append(li);
+  }
+  sec.append(list);
+}
+
 function adminSection(parent, opts) {
   const sec = section(parent, "Data review");
   sec.append(el("p", "dim",
@@ -726,21 +850,25 @@ async function openRestorePicker(onDeleted) {
 /**
  * Render the Settings page into a content-pane container.
  * @param {HTMLElement} container
- * @param {{ onExport: () => void, onExportCsv: () => void, onImport: () => void, onChanged: () => void, onPaletteChanged?: () => void, onOpenContact?: (id: number) => void, onOpenDedup?: () => void, onShowOnGraph?: (ids: number[]) => void }} opts
+ * @param {{ onExport: () => void, onExportCsv: () => void, onImport: () => void, onChanged: () => void, onPaletteChanged?: () => void, onOpenContact?: (id: number) => void, onOpenDedup?: () => void, onShowOnGraph?: (ids: number[]) => void,
+ *           initialTab?: string, onSetupChanged?: () => void, onOpenPalette?: () => void, onBackupNow?: () => void | Promise<void> }} opts
  */
 export async function renderSettings(container, opts) {
   settingsControllers.get(container)?.abort();
   const controller = new AbortController();
   settingsControllers.set(container, controller);
-  const { onExport, onExportCsv, onImport, onChanged, onPaletteChanged, onOpenContact, onOpenDedup, onShowOnGraph } = opts;
+  const { onExport, onExportCsv, onImport, onChanged, onPaletteChanged, onOpenContact, onOpenDedup, onShowOnGraph,
+    initialTab, onSetupChanged, onOpenPalette, onBackupNow } = opts;
   const rerender = () => renderSettings(container, opts);
 
   let status;
   let updateStatus;
+  let setupStatus;
   try {
-    [status, updateStatus] = await Promise.all([
+    [status, updateStatus, setupStatus] = await Promise.all([
       api().data.backupStatus({}),
       api().updates.status({}),
+      api().setup.status({}),
     ]);
   } catch (err) {
     if (controller.signal.aborted) return;
@@ -757,6 +885,7 @@ export async function renderSettings(container, opts) {
   // where the data lives, and what version is running. The last-viewed tab is
   // remembered so "check the backups again" is one click, not a re-navigation.
   const TABS = [
+    { id: "setup", label: "Setup", hint: "The one-time steps that make Orbit yours, each with what to do" },
     { id: "you", label: "You", hint: "Who your network is built around" },
     { id: "appearance", label: "Appearance", hint: "Colour palettes for the graph, legend, and map" },
     { id: "privacy", label: "Privacy & Security", hint: "Encryption, what can leave this device, and telemetry" },
@@ -765,8 +894,10 @@ export async function renderSettings(container, opts) {
     { id: "about", label: "About", hint: "Version, updates, and the log file" },
   ];
   const TAB_KEY = "orbit-settings-tab";
-  let current = localStorage.getItem(TAB_KEY);
-  if (!TABS.some((t) => t.id === current)) current = TABS[0].id;
+  // A requested tab wins; otherwise the remembered one; a first visit with the
+  // checklist still open lands on it, later visits on You.
+  let current = initialTab ?? localStorage.getItem(TAB_KEY);
+  if (!TABS.some((t) => t.id === current)) current = setupStatus.complete ? "you" : "setup";
 
   const tablist = el("div", "settings-tabs");
   tablist.setAttribute("role", "tablist");
@@ -819,6 +950,12 @@ export async function renderSettings(container, opts) {
   selectTab(current);
   const pane = (id) => /** @type {HTMLElement} */ (tabs.get(id)?.panel);
 
+  // --- Setup: the checklist ---
+  setupSection(pane("setup"), setupStatus, {
+    goTab: selectTab, onImport, onOpenPalette, onBackupNow,
+    onChanged: () => { onSetupChanged?.(); rerender(); },
+  });
+
   // --- You: who the network is built around ---
   await profileSection(pane("you"), onChanged, rerender);
   if (controller.signal.aborted) return;
@@ -849,31 +986,31 @@ export async function renderSettings(container, opts) {
   about.append(aboutSummary());
   row(about, "version", status.appVersion, "The build of Orbit currently running");
   const updateLabels = {
-    disabled: "available in signed packaged builds",
-    idle: "automatic checks enabled",
+    disabled: "switched off in config",
+    idle: "running the code on disk",
     checking: "checking…",
-    "up-to-date": "up to date",
+    "up-to-date": "running the code on disk",
     downloading: `downloading ${updateStatus.availableVersion ?? "update"}…`,
-    ready: `${updateStatus.availableVersion ?? "update"} ready; installs on restart`,
-    blocked: "downloaded, but safety backup failed",
+    ready: `${updateStatus.availableVersion ? "v" + updateStatus.availableVersion : "newer code"} on disk; restart to apply`,
+    blocked: "newer code on disk, but the safety backup failed",
     error: "last check failed",
   };
   row(about, "updates", updateLabels[updateStatus.phase] ?? updateStatus.phase,
-    "Where the automatic updater stands right now");
+    "Whether the running service matches the code in the Orbit folder. bin/orbit update fetches new code");
   if (updateStatus.error) about.append(el("p", "field-hint dim mono", updateStatus.error));
   const updateBtn = el("button", null, "Check for updates");
   updateBtn.type = "button";
   updateBtn.title = updateStatus.supported
-    ? "Ask now whether a newer version is available. Orbit also checks on its own"
-    : "Update checks only run in signed packaged builds";
+    ? "Look now for newer code in the Orbit folder (bin/orbit update fetches it). Orbit also checks on its own"
+    : "Updates are switched off in config";
   updateBtn.disabled = !updateStatus.supported || updateStatus.phase === "checking";
   updateBtn.addEventListener("click", async () => {
     updateBtn.disabled = true;
     updateBtn.textContent = "Checking…";
     try {
       const next = await api().updates.check({});
-      if (next.phase === "up-to-date") toast("Orbit is up to date.");
-      else if (next.availableVersion) toast(`Orbit ${next.availableVersion} is ${next.phase}.`);
+      if (next.phase === "up-to-date") toast("Orbit is running the current code.");
+      else if (next.phase === "ready") toast(`${next.availableVersion ? "Orbit v" + next.availableVersion : "Newer code"} is on disk. Restart to apply it.`);
       rerender();
     } catch (err) {
       toastError(err);
@@ -884,7 +1021,7 @@ export async function renderSettings(container, opts) {
   if (updateStatus.phase === "ready") {
     const restartBtn = el("button", "primary", `Restart to update${updateStatus.availableVersion ? ` to v${updateStatus.availableVersion}` : ""}`);
     restartBtn.type = "button";
-    restartBtn.title = "Close and reopen Orbit to install the downloaded update now. A verified backup was already taken";
+    restartBtn.title = "Restart the Orbit service onto the new code now. A verified backup is taken first; the page reloads when it is back";
     restartBtn.style.marginLeft = "8px";
     restartBtn.addEventListener("click", async () => {
       restartBtn.disabled = true;

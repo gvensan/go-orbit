@@ -67,3 +67,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Service: node symlink made by bin/orbit, and any local data home
+bin/node
+.orbit/

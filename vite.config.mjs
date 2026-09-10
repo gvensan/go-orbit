@@ -1,6 +1,6 @@
-// Renderer build. Output is static, fully self-contained, and loaded by the
-// main process via loadFile - no dev server, so `connect-src 'none'` holds in
-// dev exactly as in production. sigma.js and other ESM deps are bundled here.
+// Renderer build. Output is static, fully self-contained, and served by the
+// Node service from dist/renderer - no dev server, so the production CSP holds
+// in dev exactly as in production. sigma.js and other ESM deps are bundled here.
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     outDir: "../../dist/renderer",
     emptyOutDir: true,
-    target: "chrome150", // Electron 43
+    target: "es2022", // current Chrome, Safari, Firefox, Edge
     commonjsOptions: {
       // The main/shared trees are CommonJS (per CLAUDE.md) but the renderer
       // bundles config.js (single-source tunables) and shared helpers.

@@ -1,20 +1,24 @@
-// maptiles.js - user-disableable online map tiles (OpenStreetMap raster). Like geocode.js,
-// the fetch happens in the MAIN process only; the renderer stays connect-src
-// 'none' and receives each tile as a data: URL to draw on canvas. Tiles are
-// cached on disk so panning/zooming doesn't refetch, and to be polite to OSM's
-// tile servers. Gated on the same "Online maps & location search" preference.
+// maptiles.js - user-disableable online map tiles (OpenStreetMap raster). Like
+// geocode.js, the fetch happens in the SERVICE only; the browser never talks to
+// the tile host and receives each tile as a data: URL to draw on canvas. Tiles
+// are cached on disk so panning/zooming doesn't refetch, and to be polite to
+// OSM's tile servers. Gated on the same "Online maps & location search" preference.
 
 const fs = require("fs");
 const path = require("path");
-const { app } = require("electron");
 const config = require("./config");
 
-let cacheDir;
+/** @type {string | null} */
+let cacheDir = null;
+
+/** The host names the cache location at boot (it lives in the data home). */
+function setTileCacheDir(dirPath) {
+  cacheDir = dirPath;
+  try { fs.mkdirSync(cacheDir, { recursive: true }); } catch { /* best effort */ }
+}
+
 function dir() {
-  if (!cacheDir) {
-    cacheDir = path.join(app.getPath("userData"), config.map.cacheDir);
-    try { fs.mkdirSync(cacheDir, { recursive: true }); } catch { /* best effort */ }
-  }
+  if (!cacheDir) throw new Error("maptiles: setTileCacheDir() must run at boot");
   return cacheDir;
 }
 
@@ -70,4 +74,4 @@ async function fetchTile(z, x, y, theme, layer = "base") {
   return p;
 }
 
-module.exports = { fetchTile };
+module.exports = { fetchTile, setTileCacheDir };

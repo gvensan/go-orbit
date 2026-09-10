@@ -1,109 +1,84 @@
-# Build & Release — Requirements
+# Build, Install & Update
 
-**Status:** Implemented. Milestone M6 signing credentials still need to be
-configured in the GitHub repository before the first public release.
-**Config artifacts:** `electron-builder.yml`, `.github/workflows/build.yml`.
+**Status:** Authoritative for the service. Replaces the Electron packaging,
+signing and auto-update plan (see `DECISIONS.md`, 2026-09-10).
 
 ## 1. The constraint that shapes everything
 
-The app bundles a native module (`better-sqlite3-multiple-ciphers`). Native
-modules compile to a platform+arch-specific binary and cannot be reliably
-cross-compiled. So each platform is built on its own OS. There is no shortcut
-around this; do not attempt Windows-from-macOS via Wine with a native module in
-the tree.
+Orbit is a Node service plus a static bundle. There is no installer to sign, no
+per-platform binary, and no update feed. "Building" is `vite build`; "installing"
+is registering the service to start at login; "updating" is pulling code,
+rebuilding, and restarting. The one native piece, the encrypted SQLite addon,
+ships prebuilt for Node 20 through 26 and installs without a compiler.
 
-The development tree also keeps one ABI: the pinned stable Electron runtime.
-`postinstall` force-rebuilds and smoke-tests the addon, while tests, migrations,
-and fixtures use Electron's embedded-Node mode. Do not rebuild the addon with
-standalone `npm rebuild`; that would replace it with an incompatible Node ABI.
+## 2. Requirements
 
-## 2. Build matrix
+- Node 24 LTS (`.nvmrc`; `engines` in `package.json`).
+- macOS for the scripted login agent (`launchd`). Linux and Windows run the
+  service in the foreground (`bin/orbit run`) or under the user's own supervisor
+  (a systemd user unit, Task Scheduler). The service itself is cross-platform.
+- A credential store: the macOS keychain, a Secret Service on Linux
+  (`secret-tool`), DPAPI on Windows. No store, no start (SECURITY §4).
 
-A GitHub Actions matrix, one runner per OS, each running `electron-builder`,
-which invokes `@electron/rebuild` to rebuild the native module against Electron's
-ABI for that platform+arch.
+## 3. Install
 
-| OS | Runner | Outputs | Arch |
-|---|---|---|---|
-| macOS | `macos-latest`, `macos-15-intel` | `.dmg`, `.zip` | `arm64`, `x64` |
-| Windows | `windows-11-arm`, `windows-latest` | NSIS `.exe`, portable | `arm64`, `x64` |
-| Linux | `ubuntu-24.04-arm`, `ubuntu-latest` | `AppImage`, `.deb`, `.rpm` | `arm64`, `x64` |
+`install.sh` (or `bin/orbit install` on macOS):
 
-Each architecture is built and smoke-tested on a native runner. Do not combine
-architectures in one job: electron-builder's final native rebuild can leave the
-workspace addon compiled for the other architecture even when the packaged app
-itself is correct.
+1. `bin/orbit node` finds Node 24 (nvm default, newest nvm, Volta, Homebrew, PATH)
+   and symlinks it at `bin/node`, so the agent survives PATH changes.
+2. `bin/orbit build` runs `npm install` if `node_modules` is missing and
+   `npm run build` if `dist/renderer/index.html` is missing.
+3. `launchd/dev.orbit.plist.tmpl` is rendered with the repo root, `HOME`, the
+   port and the data home, then bootstrapped in the user's `gui/<uid>` domain.
+   `RunAtLoad` starts it now and at every login. `KeepAlive.SuccessfulExit=false`
+   restarts it only after a non-zero exit, which is how a restore or update
+   asks for a fresh process while `bin/orbit stop` stays down.
+4. `bin/orbit open` opens the launch URL, which carries the session token and
+   sets the cookie (SECURITY §5).
 
-Tagged publishing is the deliberate exception: each platform builds both
-already-validated architectures together so electron-builder emits a single
-`latest-*.yml` containing every architecture. Separate publishing jobs would
-race to overwrite that shared auto-update metadata file.
+Data never lives in the repo: `~/.orbit` (or `ORBIT_HOME`) holds the database,
+backups, tile cache, logs, session token and the short-lived import/export
+slots. The repo can be deleted and re-cloned without losing anything.
 
-Release CI verifies the resulting macOS bundle with `codesign` and Gatekeeper,
-every Windows installer with `Get-AuthenticodeSignature`, and each platform's
-update manifest for hashed ARM64 and x64 artifacts. Missing credentials or
-incomplete update metadata fail the release. Artifacts remain in a private
-GitHub draft until every platform passes; only then does CI publish the release
-and make it visible to the auto-updater.
+## 4. Update
 
-## 3. Signing & notarization
+`bin/orbit update`: `git pull --ff-only`, `npm install`, `npm run build`,
+restart. A copy not installed with git reruns `install.sh` from a fresh
+download; the data home is untouched.
 
-Required, and coupled to auto-update — unsigned updates won't install.
+In the UI, the top-bar pill lights up when the code on disk is newer than the
+running process (`update:status`, phase `ready`). Clicking it takes a verified
+snapshot and restarts the service; the page waits for the new process and
+reloads. Nothing is downloaded by the service itself.
 
-- **macOS:** Developer ID cert; sign then notarize with `notarytool`; staple. Secrets: cert (base64 p12), password, Apple ID / API key, team id.
-- **Windows:** Authenticode sign the installer or users hit SmartScreen. Secret: signing cert + password (or an EV/cloud signer).
-- **Linux:** no signing required; AppImage is the portable default.
+## 5. Ports and homes
 
-Secrets live in GitHub Actions encrypted secrets, never in the repo.
+| Setting | Default | Override |
+|---|---|---|
+| Port | `config.server.port` (7779) | `ORBIT_PORT` |
+| Data home | `~/.orbit` | `ORBIT_HOME` |
+| Bind address | `127.0.0.1` | none, by design |
 
-## 4. Auto-update
-
-`electron-updater` against a GitHub Releases feed (configured in
-`electron-builder.yml` `publish`). Behavior:
-
-- Check on launch and periodically; download in the background; apply on next restart.
-- **Take a backup before applying** (`config.update.backupBeforeApply`) — an update may run migrations on next boot.
-- Surface current version + a manual "check now" in Settings.
-- Updates must be signed or they will not install; the same certs from §3.
-- Development/source runs do not initialize the updater and make no release-feed requests.
-
-## 5. Versioning & channels
-
-- SemVer. The app version, the archive `appVersion`, and the release tag stay in lockstep.
-- `schemaVersion` (DB) is independent of app version; migrations bridge it.
-- One stable channel to start; a `beta` prerelease channel is optional later.
+Two services on one data home cannot happen: a pid lock in the home refuses the
+second, and the port refuses a second listener.
 
 ## 6. Reproducibility
 
-- Pin Node and Electron versions; commit the lockfile; CI uses `npm ci`.
-- Cache `node_modules` and the Electron download per-OS to keep builds fast.
-- Main-branch and pull-request builds are retained as unsigned GitHub Actions
-  artifacts for 14 days. They are validation builds, not for distribution.
-- Tagged builds are the only ones published to GitHub Releases. A tag must match
-  the version in `package.json` (for example, version `0.2.0` uses tag `v0.2.0`).
-
-### Dependency currency policy
-
-- Audit direct and transitive packages before each release with `npm outdated`
-  and `npm audit`; use stable release tags only.
-- Keep direct versions exact in `package.json` and update `package-lock.json` in
-  the same change. This makes a validated combination reproducible on every OS.
-- Keep Electron on the newest stable supported major after the cross-platform
-  build/smoke matrix passes. Its embedded Node major controls `@types/node` and
-  the native SQLite ABI; a numerically newer standalone Node type package is not
-  automatically compatible.
-- Framework, graph-engine, database, or native-addon upgrades require typecheck,
-  all tests, renderer build, native ABI verification, and the encrypted startup
-  smoke test. Database changes additionally require archive round-trip,
-  migration-backup, corruption-recovery, and wrong-key tests.
-- Never accept a major update solely because it is listed by `npm outdated`.
-  Review release notes and peer/engine constraints first; document any held-back
-  package and the compatibility reason.
+- `package-lock.json` is committed; CI uses `npm ci`.
+- `npm run verify:native` proves the addon loads on the running Node and that
+  FTS5 is compiled in, on every OS in CI.
+- The renderer bundle is deterministic for a given lockfile; it is not
+  committed, it is built at install and update.
 
 ## 7. Acceptance criteria
 
-1. A tagged release produces installers for macOS, Windows, and Linux from one workflow run.
-2. The native module loads on each platform (a smoke test opens an encrypted DB post-build).
-3. macOS artifacts are notarized and stapled; Windows artifacts are Authenticode-signed.
-4. An `electron-updater` client detects, downloads, and applies a newer signed release.
-5. A backup is taken before an update is applied.
+1. On a clean macOS with Node 24 and no compiler, `./install.sh` ends with the
+   UI open in the browser and `bin/orbit doctor` all green.
+2. `bin/orbit stop` leaves the service down through a `launchctl kickstart`-free
+   wait; `bin/orbit start` brings it back; a restore restarts it on its own.
+3. `bin/orbit update` on a repo with newer commits ends with the new version in
+   `/api/health` and the same contacts in the UI.
+4. Deleting the repo and cloning it again, then `./install.sh`, shows the same
+   data (the key and the database were never in the repo).
+5. `npm ci && npm test && npm run typecheck && npm run build` pass on macOS,
+   Linux and Windows CI.

@@ -14,6 +14,7 @@
   },
   "include": [
     "src/main/**/*.js",
+    "src/server/**/*.js",
     "src/shared/*.js",
     "src/shared/types.d.ts",
     "scripts/*.js"

@@ -85,6 +85,8 @@ export interface Tag {
  * has an empty profile until the user fills it in (onboarding or Settings).
  */
 export interface OwnerProfile {
+  /** The owner's contact id when one is set (profile:get only). */
+  contactId?: number;
   name?: string;
   gender?: string;
   email?: string;
@@ -484,6 +486,30 @@ export interface HealthFinding {
   status: HealthStatus;
 }
 
+/** One row of the Setup checklist (Settings > Setup). */
+export interface SetupStep {
+  id: string;
+  title: string;
+  /** Until every required step is done the checklist stays in the sidebar. */
+  required: boolean;
+  /** Marked by the user (setup:mark) rather than observed by the service. */
+  manual: boolean;
+  done: boolean;
+  detail: string;
+  hint: string;
+  /** What to offer: copy a value, jump to a Settings tab, start an import, back up now, open the palette. */
+  /** `bookmarklet` carries the javascript: address of the Add to Orbit button. */
+  actions: { kind: "copy" | "tab" | "import" | "backup" | "palette" | "bookmarklet"; label: string; value: string }[];
+}
+
+export interface SetupStatus {
+  steps: SetupStep[];
+  requiredDone: number;
+  requiredTotal: number;
+  remaining: number;
+  complete: boolean;
+}
+
 export interface HealthScanResult {
   findings: HealthFinding[];
   counts: { error: number; warn: number; info: number };
@@ -654,6 +680,8 @@ export interface IpcContract {
     response: { path: string | null };
   };
 
+  "setup:status": { request: {}; response: SetupStatus };
+  "setup:mark": { request: { id: string; done: boolean }; response: { ok: boolean } };
   "health:scan": { request: {}; response: HealthScanResult };
   /** The persisted result of the most recent scan; null before the first run. */
   "health:last": { request: {}; response: HealthScanResult | null };
@@ -693,7 +721,7 @@ export interface IpcError {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer bridge — the shape preload.js exposes as window.api
+// Renderer bridge - the shape web-api.js exposes as window.api (built from src/shared/api-map.js)
 // ---------------------------------------------------------------------------
 
 type Call<C extends IpcChannel> = (payload: IpcRequest<C>) => Promise<IpcResponse<C>>;
@@ -760,6 +788,10 @@ export interface RendererApi {
     candidates: Call<"dedup:candidates">;
     merge: Call<"dedup:merge">;
     undo: Call<"dedup:undo">;
+  };
+  setup: {
+    status: Call<"setup:status">;
+    mark: Call<"setup:mark">;
   };
   health: {
     scan: Call<"health:scan">;

@@ -62,7 +62,12 @@ review for weak ones. Recent merges list with one-click undo.
 **Trash.** Soft-deleted contacts with deletion date; restore or purge (purge is
 a real delete, confirmed). Auto-purge after N days, surfaced clearly.
 
-**Settings.** Six tabs, one per concern; the last-viewed tab is remembered.
+**Settings.** Seven tabs, one per concern; the last-viewed tab is remembered
+(a first visit lands on *Setup* while a required step is open). *Setup*: the
+checklist of one-time steps in the golinks shape, each self-checking where the
+service can see the answer and "Mark done" where only the user knows, with the
+action that completes it; it also sits in the sidebar, with the count of open
+required steps, until those are done.
 *Review*: an on-demand data review - structural, relationship, quality, and
 graph-shape checks rendered as severity-ranked cards, each with a safe one-click
 fix where one exists, a deep link to the offending record otherwise, and
@@ -119,6 +124,10 @@ action, in the interface's voice — no apologies, no raw stack traces. Map the
 | Keychain unavailable | "Can't reach your system keychain, so the database can't be unlocked. <OS-specific fix>." |
 | Import version too new | "This export is from a newer version. Update the app to import it." |
 | `LOCKED` | "Busy finishing a backup — one moment." (transient, auto-retries) |
+| Service restarting (after restore / update) | Banner "Orbit is restarting…"; the page reloads itself when the new process answers, or after 30 s: "Orbit did not come back on its own. Start it with bin/orbit start, then reload." |
+| Service unreachable | Banner "Orbit's service isn't responding. Start it with bin/orbit start, then reload." Typed input is kept; the banner clears on its own when the service answers again. |
+| Setup not finished | Sidebar shows "Setup" with the count of open required steps; Settings > Setup lists every step with its action. Disappears from the sidebar when the required steps are done. |
+| No browser session | The locked page: "Orbit is locked to this machine" + `bin/orbit open`. Shows nothing about the data, not even the version. |
 
 ## 6. Accessibility & responsiveness
 

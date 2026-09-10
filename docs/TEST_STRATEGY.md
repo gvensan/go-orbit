@@ -51,7 +51,7 @@ Explicit, automated, non-negotiable:
 
 ## 6. CI
 
-- Runs unit + integration + acceptance on every push (Linux runner is enough for logic; renderer/perf tests use a headless Electron).
+- Runs unit + integration + acceptance on every push (Linux runner is enough for logic; the HTTP host is driven end to end on an ephemeral port in test/server-app.test.js).
 - The build matrix (`BUILD_AND_RELEASE.md`) runs on tags and includes a post-build smoke test that opens an encrypted DB on each OS.
 - Fixtures are generated in-CI (cached) rather than committed.
 

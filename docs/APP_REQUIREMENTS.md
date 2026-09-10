@@ -1,6 +1,6 @@
 # Orbit - Application Requirements & Feature Specification
 
-**Product:** Orbit - an Electron desktop CRM that stores contacts as a relationship graph
+**Product:** Orbit - a local web-service CRM (Node service + browser UI, one machine) that stores contacts as a relationship graph
 **Status:** Ready for implementation
 **Audience:** Claude Code
 **Scale target:** 20,000 contacts, ~200,000 edges, single-device, offline-first
@@ -28,14 +28,14 @@ A single owner curating a large personal or professional network — hundreds to
 
 ## 4. Stack
 
-- **Shell:** Electron. `contextIsolation` on, sandboxed renderer, `nodeIntegration` off, validated IPC bridge.
+- **Shell:** a Node HTTP service on loopback (`src/server/`) serving the UI to the user's browser; session cookie, Host/Origin guards, strict CSP, validated RPC (see DECISIONS.md 2026-09-10).
 - **Store:** SQLite via `better-sqlite3-multiple-ciphers` (SQLCipher, AES-256), WAL mode. Single encrypted file.
 - **Graph model:** `graphology` in-memory, hydrated from SQLite at boot.
 - **Graph render:** `sigma.js` v3 (WebGL) over graphology. Layout via `graphology-layout-forceatlas2` in a worker.
 - **Search:** SQLite FTS5 (fielded, prefix, trigram, diacritic-folding) + a JS fuzzy re-rank, on a read-only worker connection.
-- **Key management:** OS keychain via Electron `safeStorage`.
-- **Build/distribution:** `electron-builder` on a GitHub Actions matrix (`macos`, `ubuntu`, `windows`); `electron-updater` for delivery.
-- **Observability:** `electron-log` local logs; opt-in Sentry, PII-scrubbed.
+- **Key management:** OS credential store via its CLI (`security` / `secret-tool` / DPAPI), see SECURITY §4.
+- **Build/distribution:** `install.sh` + `bin/orbit` (launchd login agent on macOS); `bin/orbit update` pulls, rebuilds, restarts. CI tests on macOS, Linux, Windows.
+- **Observability:** a local rotating log in the data home; no telemetry.
 
 ## 5. Architecture
 
@@ -72,9 +72,9 @@ Local-first, main-process-orchestrated. Boot brings components up in dependency 
 | Search | Filters, operators, graph-aware, did-you-mean | see sub-spec (Need) |
 | Graph | Shortest path, centrality, clustering, filters | see sub-spec (Need) |
 | Distribution | Code signing + notarization | mac `notarytool`, Windows signing; required for auto-update |
-| Distribution | Auto-update | `electron-updater` + release feed; backup before applying |
+| Distribution | Update | `bin/orbit update` + in-app restart pill; verified backup before applying |
 | UX | Responsive desktop layout | min window size; reflow (constant node size), not uniform zoom |
-| Observability | Local logging | `electron-log`, rotating, in `userData` |
+| Observability | Local logging | rotating `orbit.log` in the data home, PII-free |
 | Observability | Crash reporting (opt-in) | Sentry opt-in, PII-scrubbed |
 | Quality | Recovery + migration + export tests | corruption self-heal, migration-forward, export→import fidelity |
 

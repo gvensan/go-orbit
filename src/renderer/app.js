@@ -2,7 +2,9 @@
 // palette, keyboard model, modals (import wizard, trash, dedup), and the
 // undo-first delete flow.
 
+import config from "../main/config.js";
 import { CITY_COORDS } from "../shared/cities.js";
+import { guessFromPage } from "../shared/page-guess.js";
 import { ContactCard } from "./card.js";
 import { EDGE_COLORS, EDGE_TYPES } from "./colors.js";
 import { ExploreView } from "./explore.js";
@@ -216,7 +218,7 @@ function renderUpdateHint(state) {
   if (!show) return;
   if (ready) {
     pill.textContent = `↑ ${v} ready · Restart`;
-    pill.title = "A new version is ready. Click to restart and update now (it also installs automatically on quit).";
+    pill.title = "Newer code is ready. Click to restart Orbit and apply it (a verified backup is taken first).";
   } else {
     pill.textContent = `↓ Downloading ${v}…`;
     pill.title = "A new version is downloading in the background.";
@@ -230,13 +232,26 @@ async function onUpdatePillClick() {
   if (state.phase === "ready") {
     const yes = await confirmModal({
       title: "Restart to update?",
-      message: `Orbit ${state.availableVersion ? "v" + state.availableVersion : ""} is ready. Restart now to install it? Your data is safe - a verified backup was already taken.`,
+      message: `${state.availableVersion ? "Orbit v" + state.availableVersion : "Newer Orbit code"} is on disk. Restart the service now to apply it? Your data is safe: a verified backup is taken first, and this page reloads when Orbit is back.`,
       confirmLabel: "Restart & update",
     });
     if (yes) await api.updates.install({}).catch(toastError);
   } else {
     runCommand("settings"); // downloading: show details in Settings > About
   }
+}
+
+/** The Setup checklist lives in the sidebar only while a required step is open;
+ *  afterwards it stays reachable under Settings > Setup, as in golinks. */
+async function refreshSetupNav() {
+  try {
+    const s = await api.setup.status({});
+    const item = $("nav-setup");
+    item.hidden = s.complete;
+    const badge = $("setup-badge");
+    badge.textContent = String(s.requiredTotal - s.requiredDone);
+    badge.hidden = s.complete;
+  } catch { /* sidebar hint only; the checklist itself reports errors */ }
 }
 
 /** Quiet trust strip: the safety net, visibly working. */
@@ -632,9 +647,18 @@ function showConnectionMenu(anchorId, anchorName, pos) {
   }, 0);
 }
 
-async function addConnectionTo(anchorId, anchorName, type) {
+/**
+ * Create a contact already linked to `anchorId`. Without a draft it is the
+ * card's "Add connection": a placeholder named after the tie, opened ready to
+ * be renamed. With a draft (the Add to Orbit bookmarklet) the person arrives
+ * named and filled in, so the card opens as it is.
+ * @param {{ name: string, fields?: Record<string, string> }} [draft]
+ */
+async function addConnectionTo(anchorId, anchorName, type, draft) {
   try {
-    const contact = await api.contacts.create({ name: `New ${type}` });
+    const contact = draft
+      ? await api.contacts.create({ name: draft.name, fields: draft.fields || {} })
+      : await api.contacts.create({ name: `New ${type}` });
     try {
       await api.edges.create({ sourceId: anchorId, targetId: contact.id, type, directed: false });
     } catch (err) {
@@ -648,11 +672,260 @@ async function addConnectionTo(anchorId, anchorName, type) {
     }
     await refreshSnapshot();
     pushNav(); // Back returns to where you were
-    await selectContact(contact.id, { from: anchorId, fromName: anchorName, startRename: true });
-    toast(`Added a ${type} of ${anchorName} - type their name.`);
+    await selectContact(contact.id, { from: anchorId, fromName: anchorName, startRename: !draft });
+    toast(draft ? `Added ${contact.name} as a ${type} of ${anchorName}.` : `Added a ${type} of ${anchorName} - type their name.`);
   } catch (err) {
     toastError(err);
   }
+}
+
+// --- Add to Orbit (the bookmarklet): the page's details arrive in the URL hash
+// as #add=<query>. The app drafts the person, checks for someone you already
+// have, then runs its own "Add connection" choice: the same coloured tie rows as
+// the card's menu, anchored to you, plus "just add" when they are not connected
+// to you. The result is the real card, every field editable in place. ---
+function readAddDeepLink() {
+  const m = location.hash.match(/^#add=(.+)$/);
+  if (!m) return null;
+  history.replaceState(null, "", location.pathname); // one-shot; a reload must not re-add
+  let q;
+  try { q = new URLSearchParams(decodeURIComponent(m[1])); } catch { return null; }
+  const pick = (k) => q.get(k) || "";
+  return { url: pick("url"), title: pick("title"), text: pick("text"), og: pick("og"), desc: pick("desc"), site: pick("site") };
+}
+
+function ownerNode() {
+  return lastSnapshot ? lastSnapshot.nodes.find((n) => n.isOwner) || null : null;
+}
+
+/** Ask the read-only match engine whether this draft is someone already here. */
+async function likelyExisting(draft) {
+  try {
+    const { results } = await api.data.importMatch({ records: [{ name: draft.name, fields: draft.fields }] });
+    const best = results[0] && results[0].candidates[0];
+    return best && best.score >= config.bookmarklet.matchMin ? best : null;
+  } catch {
+    return null; // advisory only
+  }
+}
+
+async function addFromPage(page) {
+  const guess = guessFromPage(page);
+  const owner = ownerNode();
+  let settled = false;
+  const m = openModal({ title: "Add to Orbit" });
+
+  // What will be created: the name is the one guess worth correcting up front;
+  // everything else is on the card afterwards, with the card's own controls.
+  const nameRow = el("div", "form-row");
+  const nameLabel = el("label", null, "Name");
+  nameLabel.htmlFor = "addpage-name";
+  const nameInput = /** @type {HTMLInputElement} */ (el("input"));
+  nameInput.type = "text";
+  nameInput.id = "addpage-name";
+  nameInput.value = guess.name;
+  nameInput.maxLength = 300;
+  nameInput.placeholder = "Who is this?";
+  nameInput.title = "The name this person will have in Orbit; correct it here if the page's title was not just a name";
+  nameRow.append(nameLabel, nameInput);
+  m.body.append(nameRow);
+
+  const preview = el("div", "addpage-fields");
+  const order = ["role", "company", "email", "phone", "linkedin", "notes"];
+  for (const key of order) {
+    if (!guess.fields[key]) continue;
+    const r = el("div", "field-row");
+    const val = el("span", "field-val", guess.fields[key]);
+    val.title = guess.fields[key];
+    r.append(el("span", "field-key mono", key), val);
+    preview.append(r);
+  }
+  if (preview.childElementCount) m.body.append(preview);
+  if (guess.source) {
+    const src = el("p", "field-hint dim", `From ${guess.source}. Everything above is editable on the card once added.`);
+    src.title = page.url;
+    m.body.append(src);
+  }
+
+  const warn = el("div", "addpage-match");
+  warn.hidden = true;
+  m.body.append(warn);
+
+  // Who the new person connects to: you by default, or anyone already in the
+  // graph, found with the same search the palette uses.
+  /** @type {{ id: number, name: string } | null} */
+  let anchor = owner ? { id: owner.id, name: owner.name } : null;
+  const anchorRow = el("div", "form-row addpage-anchor");
+  const anchorLabel = el("label", null, "Connect to");
+  anchorLabel.htmlFor = "addpage-anchor";
+  const anchorInput = /** @type {HTMLInputElement} */ (el("input"));
+  anchorInput.type = "text";
+  anchorInput.id = "addpage-anchor";
+  anchorInput.setAttribute("role", "combobox");
+  anchorInput.setAttribute("aria-autocomplete", "list");
+  anchorInput.setAttribute("aria-expanded", "false");
+  anchorInput.autocomplete = "off";
+  anchorInput.placeholder = "Search your contacts…";
+  anchorInput.title = "Who this person is connected to. Type to search everyone in Orbit; leave it as you to connect them to yourself";
+  anchorInput.value = anchor ? anchor.name : "";
+  const anchorMenu = el("div", "location-suggestions");
+  anchorMenu.setAttribute("role", "listbox");
+  anchorMenu.hidden = true;
+  anchorRow.append(anchorLabel, anchorInput, anchorMenu);
+  m.body.append(anchorRow);
+
+  const pickHead = el("div", "node-menu-head mono");
+  const choices = el("div", "addpage-choices");
+  const tieRows = /** @type {HTMLButtonElement[]} */ ([]);
+  const syncAnchor = () => {
+    pickHead.textContent = anchor ? `New connection to ${anchor.name}` : "Pick who they connect to, or just add them";
+    for (const r of tieRows) r.disabled = !anchor;
+  };
+
+  let anchorRequest = 0;
+  let anchorTimer = 0;
+  /** @type {{ id: number, name: string, sub: string, degree: number }[]} */
+  let anchorHits = [];
+  let anchorActive = -1;
+  const closeAnchorMenu = () => { anchorMenu.hidden = true; anchorInput.setAttribute("aria-expanded", "false"); anchorActive = -1; };
+  const chooseAnchor = (hit) => {
+    anchor = { id: hit.id, name: hit.name };
+    anchorInput.value = hit.name;
+    closeAnchorMenu();
+    syncAnchor();
+  };
+  const renderAnchorMenu = () => {
+    anchorMenu.innerHTML = "";
+    if (!anchorHits.length) {
+      anchorMenu.append(el("div", "location-suggestion-message dim", "No one by that name yet"));
+    }
+    anchorHits.forEach((hit, i) => {
+      const row = el("button", `location-suggestion${i === anchorActive ? " active" : ""}`);
+      row.type = "button";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(i === anchorActive));
+      row.title = `Connect the new person to ${hit.name}`;
+      const label = el("span", "location-suggestion-label", hit.name);
+      if (hit.sub) label.append(" ", el("span", "row-sub dim", hit.sub));
+      row.append(label, el("span", "conn-degree mono", `${hit.degree}°`));
+      row.addEventListener("mousedown", (e) => e.preventDefault()); // keep the input's focus
+      row.addEventListener("click", () => chooseAnchor(hit));
+      anchorMenu.append(row);
+    });
+    anchorMenu.hidden = false;
+    anchorInput.setAttribute("aria-expanded", "true");
+  };
+  const searchAnchor = async () => {
+    const text = anchorInput.value.trim();
+    if (!text) { anchorHits = []; closeAnchorMenu(); return; }
+    const rid = ++anchorRequest;
+    try {
+      const resp = await api.search.query({ text, requestId: rid, limit: 8 });
+      if (resp.requestId !== anchorRequest || settled) return;
+      anchorHits = resp.results.map((r) => ({ id: r.contactId, name: r.name, sub: [r.role, r.org].filter(Boolean).join(" · "), degree: r.degree }));
+      anchorActive = anchorHits.length ? 0 : -1;
+      renderAnchorMenu();
+    } catch { /* the palette's search worker reports its own failures */ }
+  };
+  anchorInput.addEventListener("input", () => {
+    // Typing means "someone else": the previous choice no longer applies until a row is picked.
+    anchor = null;
+    syncAnchor();
+    clearTimeout(anchorTimer);
+    anchorTimer = window.setTimeout(searchAnchor, config.search.debounceMs);
+  });
+  anchorInput.addEventListener("focus", () => { if (anchor) anchorInput.select(); });
+  anchorInput.addEventListener("blur", () => setTimeout(closeAnchorMenu, 120));
+  anchorInput.addEventListener("keydown", (e) => {
+    if (anchorMenu.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); anchorActive = Math.min(anchorHits.length - 1, anchorActive + 1); renderAnchorMenu(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); anchorActive = Math.max(0, anchorActive - 1); renderAnchorMenu(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (anchorHits[anchorActive]) chooseAnchor(anchorHits[anchorActive]); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAnchorMenu(); }
+  });
+
+  m.body.append(pickHead);
+  const draftNow = () => ({ name: nameInput.value.trim(), fields: guess.fields });
+  const finish = async (run) => {
+    if (settled) return;
+    const draft = draftNow();
+    if (!draft.name) { nameInput.focus(); toast("A name is needed."); return; }
+    settled = true;
+    m.close();
+    await run(draft);
+  };
+  for (const type of EDGE_TYPES) {
+    const item = /** @type {HTMLButtonElement} */ (el("button", "node-menu-item"));
+    item.type = "button";
+    item.title = type === "introduced"
+      ? "Add this person as someone the chosen contact introduced. This link has a direction"
+      : `Add this person connected to the chosen contact as ${type}`;
+    const dot = el("span", "node-menu-dot");
+    dot.style.background = EDGE_COLORS[type] ?? "";
+    item.append(dot, el("span", null, type));
+    item.addEventListener("click", () => {
+      const to = anchor;
+      if (!to) { anchorInput.focus(); return; }
+      finish((draft) => addConnectionTo(to.id, to.name, type, draft));
+    });
+    tieRows.push(item);
+    choices.append(item);
+  }
+  syncAnchor();
+  const plain = el("button", "node-menu-item");
+  plain.type = "button";
+  plain.title = "Add this person without a connection; you can link them later from their card";
+  plain.append(el("span", "node-menu-dot node-menu-dot--none"), el("span", null, "Just add, no connection"));
+  plain.addEventListener("click", () => finish(async (draft) => {
+    try {
+      const contact = await api.contacts.create({ name: draft.name, fields: draft.fields });
+      await refreshSnapshot();
+      pushNav();
+      await selectContact(contact.id);
+      toast(`Added ${contact.name}.`);
+    } catch (err) {
+      toastError(err);
+    }
+  }));
+  choices.append(plain);
+  m.body.append(choices);
+
+  const cancel = el("button", null, "Cancel");
+  cancel.type = "button";
+  cancel.title = "Add nobody (Esc)";
+  cancel.addEventListener("click", () => m.close());
+  m.foot.append(cancel);
+  nameInput.focus();
+  if (nameInput.value) nameInput.select();
+
+  // Duplicate check, after the dialog is up so it never delays it.
+  const existing = await likelyExisting(draftNow());
+  if (existing && !settled) {
+    warn.innerHTML = "";
+    const who = existing.company ? `${existing.name} (${existing.company})` : existing.name;
+    warn.append(el("p", null, `Looks like you already have ${who}${existing.reasons.length ? `: ${existing.reasons.join(", ")}` : ""}.`));
+    const openBtn = el("button", "primary", `Open ${existing.name}`);
+    openBtn.type = "button";
+    openBtn.title = "Open the existing card instead of adding a second copy";
+    openBtn.addEventListener("click", async () => { settled = true; m.close(); pushNav(); await selectContact(existing.contactId); });
+    warn.append(openBtn, el("span", "dim", " or pick a connection below to add a new person anyway."));
+    // The existing person is also the likeliest connection target when the page
+    // is about someone they know; leave the anchor alone, just surface them.
+    warn.hidden = false;
+  }
+}
+
+/** Run the Add to Orbit flow for a #add= link, now and whenever one arrives
+ *  while this window is open (the bookmarklet reuses a tab it opened). */
+function wireAddDeepLink() {
+  // Name the window so the bookmarklet's window.open(url, name) can find it.
+  if (!window.name) window.name = config.bookmarklet.windowName;
+  const run = () => {
+    const page = readAddDeepLink();
+    if (page) addFromPage(page);
+  };
+  window.addEventListener("hashchange", run);
+  return run;
 }
 
 /** Natural-language capture from the palette (see shared/quick-add.js). */
@@ -714,6 +987,7 @@ function runCommand(id) {
     "dedup": () => openDedupQueue({ onChanged: () => onDataChanged() }),
     "trash": () => openTrash({ onChanged: () => onDataChanged() }),
     "settings": () => openSettingsPage(),
+    "setup": () => openSettingsPage("setup"),
     "about": () => showAbout(),
     "shortcuts": () => showShortcuts(),
     "backup": () => doBackup(),
@@ -764,6 +1038,7 @@ function showShortcuts() {
     [shortcut("L"), "Explore (faceted people-search)"],
     [shortcut("N"), "New contact (via palette)"],
     [shortcut("E"), "Export archive"],
+    [IS_MAC ? "⌃N · ⌃L · ⌃I · ⌃," : "Alt+N · Alt+L · Alt+I · Alt+,", "New contact · Explore · Import · Settings (work in every browser)"],
     ["g g", "Graph home"],
     ["Esc", "Close / clear path / back to home"],
     ["Del", "Delete selected contact (undoable)"],
@@ -1183,13 +1458,18 @@ function refreshLegend() {
   );
 }
 
-function openSettingsPage() {
+/** @param {string} [tab] a Settings tab to land on (else the remembered one) */
+function openSettingsPage(tab) {
   state.selectedId = null;
   state.selectedName = null;
   card.hide();
   resetNav();
-  setActiveNav("settings");
+  setActiveNav(tab === "setup" ? "setup" : "settings");
   renderSettings($("settings"), {
+    initialTab: tab,
+    onSetupChanged: () => refreshSetupNav(),
+    onOpenPalette: () => palette.open(""),
+    onBackupNow: () => doBackup(),
     onExport: () => exportArchiveFlow(),
     onExportCsv: () => exportCsvFlow(),
     onImport: () => startImport(),
@@ -1248,6 +1528,7 @@ async function exportArchiveFlow() {
 async function onDataChanged() {
   await refreshSnapshot();
   refreshAttentionBadge();
+  refreshSetupNav();
   if (currentView === "explore") {
     await explore.run();
     if (state.selectedId != null) {
@@ -1706,9 +1987,11 @@ export async function init() {
 
   refreshBackupStrip();
   refreshAttentionBadge();
+  refreshSetupNav();
   setInterval(() => {
     refreshBackupStrip();
     refreshAttentionBadge();
+    refreshSetupNav();
   }, 5 * 60 * 1000);
 
   // Update hint: read the launch-time state, then listen for live changes.
@@ -1732,6 +2015,22 @@ export async function init() {
       if (!sampleDataset && ownerMissing()) promptOwnerAfterData();
     } else if (!localStorage.getItem("orbit-onboarded")) {
       onboarding.hidden = false;
+    }
+    // Deep links: #contact=<id> opens a card; #add=<query> is the Add to Orbit
+    // bookmarklet, which runs the app's own add-connection flow.
+    const deep = location.hash.match(/^#contact=(\d+)$/);
+    if (deep) {
+      history.replaceState(null, "", location.pathname);
+      if (!landingActive && state.contactCount > 0) await selectContact(Number(deep[1]));
+    }
+    const runAdd = wireAddDeepLink();
+    if (landingActive && /^#add=/.test(location.hash)) {
+      // The start screen owns this moment: adding to a sample network by
+      // accident would be worse than asking for one more click.
+      history.replaceState(null, "", location.pathname);
+      toast("Choose a network first (keep exploring the sample, or start your own), then use Add to Orbit again.", { ttlMs: 8000 });
+    } else {
+      runAdd();
     }
     if (!landingActive) await refreshSampleBanner();
     console.log(

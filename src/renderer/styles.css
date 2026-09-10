@@ -1787,6 +1787,55 @@ input[type="date"] { color-scheme: dark; }
 .health-chip.info { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .health-resolved { font-size: 12px; color: var(--ok); }
 .health-when { font-size: 11px; margin-left: auto; }
+/* Add to Orbit: the bookmarklet button (Settings > Setup) */
+.bookmarklet {
+  display: inline-block; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 13px;
+  background: var(--active); border: 1px solid var(--active-border); color: var(--text);
+  text-decoration: none; cursor: grab; user-select: none;
+}
+.bookmarklet:active { cursor: grabbing; }
+
+/* Add to Orbit dialog (the bookmarklet's #add= deep link) */
+.addpage-fields { margin: 8px 0 4px; }
+.addpage-fields .field-val { white-space: pre-wrap; word-break: break-word; max-height: 4.5em; overflow: hidden; }
+.addpage-match { border: 1px solid var(--hairline); border-left: 3px solid #d8792c; border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+.addpage-match p { margin: 0 0 6px; }
+.addpage-anchor { position: relative; }
+.addpage-anchor .location-suggestions { left: 104px; }
+.addpage-anchor .conn-degree { margin-left: auto; color: var(--faint); }
+.addpage-choices { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.addpage-choices .node-menu-item:disabled { opacity: 0.45; cursor: default; }
+.addpage-choices .node-menu-item { width: 100%; text-align: left; }
+.node-menu-dot--none { border: 1.5px dashed var(--faint); background: transparent; }
+
+/* Settings > Setup checklist */
+.setup-head { justify-content: space-between; margin-bottom: 6px; }
+.setup-progress-text { font-weight: 600; }
+.setup-progress-bar { height: 4px; background: var(--hairline); border-radius: 999px; overflow: hidden; margin: 0 0 14px; }
+.setup-progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 240ms ease; }
+.setup-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.setup-step {
+  border: 1px solid var(--hairline); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 10px 14px 12px; background: var(--panel, transparent);
+}
+.setup-step.optional { border-left-color: var(--faint); }
+.setup-step.done { border-left-color: var(--ok, #3f9d76); }
+.setup-step.done h4 { color: var(--dim); }
+.setup-step-head { display: flex; align-items: center; gap: 10px; }
+.setup-step-head h4 { margin: 0; font-size: 14px; flex: 1; }
+.setup-mark {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid var(--faint); display: inline-grid; place-items: center;
+  font-size: 12px; line-height: 1; color: #fff;
+}
+.setup-step.done .setup-mark { background: var(--ok, #3f9d76); border-color: var(--ok, #3f9d76); }
+.setup-opt { font-size: 11px; font-weight: 500; color: var(--faint); margin-left: 4px; }
+.setup-step-body { margin-top: 6px; }
+.setup-step-body p { margin: 4px 0; line-height: 1.45; }
+.setup-step-body .card-actions { margin: 10px 0 0; }
+.setup-step-body code { padding: 3px 7px; background: var(--hover); border-radius: 5px; word-break: break-all; }
+@media (prefers-reduced-motion: reduce) { .setup-progress-fill { transition: none; } }
+
 .health-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .health-empty { padding: 8px 0; }
 .health-card {

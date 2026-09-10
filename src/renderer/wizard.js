@@ -600,7 +600,7 @@ export async function openImportWizard({ onDone, reloadPath }) {
     return lines;
   }
 
-  // Custom hover popup (native title tooltips don't fire reliably in Electron
+  // Custom hover popup (native title tooltips are slow and styled by the OS
   // and would be clipped by the table's scroll container).
   let warnTipEl = null;
   function showWarnTip(anchor, lines) {
@@ -765,7 +765,7 @@ export async function openImportWizard({ onDone, reloadPath }) {
         statusIcon.append(ok);
       } else {
         const w = el("span", "row-warn", "⚠");
-        // Native title tooltips are unreliable in Electron - use a custom popup.
+        // Native title tooltips are slow and OS-styled - use a custom popup.
         w.addEventListener("mouseenter", () => showWarnTip(w, describeIssues(rowIssues(row))));
         w.addEventListener("mouseleave", hideWarnTip);
         statusIcon.append(w);
@@ -1326,8 +1326,8 @@ export async function openImportWizard({ onDone, reloadPath }) {
       return { name: rec.name, fields: rec.fields, tags: rec.tags || [], status: outcomeOf(row, i) };
     });
     try {
-      // defaultName maps to Electron's defaultPath, which accepts a full path:
-      // CSV pre-selects the source (easy overwrite); vCard gets a sidecar CSV.
+      // The bridge keeps only the base name for the download: a CSV import
+      // yields a results file named like its source; vCard gets a sidecar CSV.
       const defaultName = state.kind === "csv" && state.srcPath
         ? state.srcPath
         : (state.srcPath ? state.srcPath.replace(/\.[^.]+$/, "") + "-orbit-results.csv" : "orbit-import-results.csv");

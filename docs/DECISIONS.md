@@ -14,6 +14,194 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-10 - Add to Orbit: a bookmarklet, in the golinks shape
+
+- Golinks' "Add to Golinks" is a bookmarks-bar button that saves the page you
+  are on. Orbit's equivalent adds the person the page is about: click it on a
+  LinkedIn profile, a company page, or anything that names someone, and Orbit
+  itself opens in a tab on a `#add=<query>` deep link with
+  that person drafted: name, role, company, LinkedIn or website link, any
+  selected text as notes. The app then runs its own add-connection flow in its
+  own modal: a "Connect to" search over everyone in the graph (the palette's
+  search worker, you preselected), the same coloured tie rows as the card's
+  "Add connection" menu headed "New connection to <them>", plus "Just add, no
+  connection"; a match
+  against people you already have (the read-only `import:match`, floor
+  `config.bookmarklet.matchMin`) offers to open them instead. Choosing a tie
+  reuses `addConnectionTo` with the draft, so the card opens named and filled
+  in, every field editable with the card's real controls.
+- **A first cut as a separate popup page was built and thrown out the same
+  day.** A bespoke `/add` form was a lesser copy of the card (its own inputs,
+  its own styling, no tie picker with the palette colours) when the real app
+  runs one navigation away. The rule this leaves behind: the bookmarklet drives
+  the app; it never gets a UI of its own.
+- **The page address is not kept** (the owner's call). A bookmark tool records
+  where you were; Orbit records people, and the URL of a search page or an
+  article is not a fact about the person. A LinkedIn profile link is, and it
+  stays in the `linkedin` field. A short selection (a name) is the draft's
+  name; a long one is notes.
+- **What the bookmarklet carries.** The page's address, title, Open Graph
+  title/description/site name, and up to `config.bookmarklet.selectionMax`
+  characters of selected text, in the URL hash, which never reaches the
+  service. Parsing (a LinkedIn "Name - Role - Company | LinkedIn" title into
+  three fields) lives in `src/shared/page-guess.js`, unit-tested, and its
+  result is shown before anything is written. The bookmarklet carries the
+  port and nothing else; `src/server/bookmarklet.js` builds it.
+- **A tab, not a popup** (the owner's call, and right): the app needs its full
+  width for the rail, the canvas and the card panel, and the browser places and
+  focuses a tab better than a sized window. The app names its window
+  (`config.bookmarklet.windowName`) and the bookmarklet targets that name, so a
+  tab it opened earlier is reused where the browser allows and the app handles
+  the `hashchange`; browsers only honour a name across tabs that share an
+  opener, so a tab the user opened by hand gets a sibling rather than being
+  taken over. That limit is the browser's, not ours.
+- **Cookie relaxed from Strict to Lax.** The tab is a top-level GET to our
+  origin initiated from another site; Strict withholds the cookie on exactly
+  that, so it would have shown the locked page. Lax still withholds the cookie
+  on cross-site POSTs and subresources, and every write is a POST behind the
+  Origin and `Sec-Fetch-Site` guards, so the CSRF posture is unchanged.
+- `profile:get` now includes `contactId` (harmless, and useful to any future
+  client that must find the owner without loading the graph).
+- The Setup checklist gained an "Add people from any web page" step (manual)
+  that renders the draggable button and a Copy code fallback, as golinks does.
+
+## 2026-09-10 - Settings > Setup: a checklist in the golinks shape
+
+- Golinks greets a new install with a setup checklist: a few one-time steps,
+  each self-checking where the service can see the answer and "Mark done"
+  where only the user knows, a live re-check, the exact value to copy, and a
+  sidebar entry that disappears once the required steps are done while the page
+  stays under Settings. Orbit now has the same, as the first Settings tab.
+- **Steps.** Required: Orbit is running (auto; says whether launchd started it),
+  keep this browser signed in (auto; copy the address, explains `bin/orbit open`
+  for other browsers), tell Orbit who you are (auto; owner set), add your people
+  (auto; own contacts present, a loaded sample deliberately does not count).
+  Optional: know where your data lives (auto; first backup taken; names the
+  home, the cadence, the key store), start Orbit at login (auto; launchd parent
+  or the agent plist present; copy `bin/orbit install`), decide about online
+  maps and location search (manual; shows the current preference), bring data
+  from the desktop Orbit (manual; the .orbit archive path).
+- **Where the truth lives.** `src/main/setup/checklist.js` builds the steps
+  from the database and a small `setupInfo()` the host supplies (version, port,
+  launchd, plist, key backend). Auto steps cannot be marked: a stale mark could
+  only mislead. Manual marks are one JSON value in `app_meta` (`setup.done`),
+  so they travel with the database and survive a reinstall of the code.
+  Channels `setup:status` and `setup:mark`; the sidebar item and badge come from
+  `refreshSetupNav()` in app.js on boot, on every data change, and when a mark
+  changes; a first visit to Settings lands on Setup while a required step is
+  open, later visits on the remembered tab.
+- **Rejected.** Opening the checklist on its own on first launch: Orbit already
+  has a landing screen for an empty database (choose a sample or start your
+  own), and two competing first screens would be worse than one. The sidebar
+  badge with the count of open required steps does the nudging instead.
+
+## 2026-09-10 - Orbit is a local web service, not an Electron app
+
+- **What changed.** The Electron host (`main.js`, `preload.js`, `menu.js`,
+  `updater.js`, `keys.js`, electron-builder, the ABI shim) is gone. A Node HTTP
+  service in `src/server/` binds `127.0.0.1:7779` (`config.server`), serves the
+  Vite bundle from `dist/renderer`, and exposes every registry channel as
+  `POST /api/rpc/<channel>`. `src/renderer/web-api.js` builds the same
+  `window.api` the preload used to, from one shared table
+  (`src/shared/api-map.js`). The shape is the same as the sibling golinks
+  project: a login agent under launchd, plain Node, a browser tab as the UI,
+  data in a folder the user owns (`~/.orbit`, `ORBIT_HOME`).
+- **Why.** The desktop build's value was all in the engine and the renderer, and
+  both were already host-independent: the data layer ran under plain Node in
+  tests, and the renderer touched Electron only through `window.api`. What the
+  Electron wrapper bought - a window, native dialogs, a native menu, a signed
+  installer, auto-update - cost a native rebuild per Electron release, a
+  code-signing pipeline, and an ABI shim around every script. A local service
+  keeps everything that made Orbit Orbit (SQLCipher, workers, backups, FTS5)
+  and drops the wrapper.
+- **What did not change.** `src/main/` is unchanged in structure and is now the
+  service core; the name is kept because renaming it would touch every test
+  and doc for no behavioural gain. Registry, validation, error codes, schema,
+  migrations, backups, workers, the search engine, dedup, health: untouched.
+  The renderer is untouched apart from `boot.js` importing the bridge, one
+  shortcuts row, the CSP meta, and a favicon.
+- **The 23 channels that touched the host, and where each went.**
+  - `dialog:openFile` / `dialog:saveFile` never reach the service. The bridge
+    opens a browser file picker and POSTs the file to `/api/files/upload`,
+    which writes it into a granted slot under `<home>/uploads/` and returns the
+    path; the import channels then read it exactly as before (`requireGranted`
+    still gates them, the grant now being "the service minted this path").
+    `saveFile` asks `/api/files/export-slot` for a granted path under
+    `<home>/exports/`; when the export channel resolves, the bridge triggers
+    `GET /api/files/download?path=` and the slot is deleted as the bytes
+    finish. The user sees the file in their Downloads; the toast names the
+    file, not a server path.
+  - `backup:restore*` restore exactly as before, then the process exits with
+    `config.server.restartExitCode` (non-zero, so launchd's KeepAlive on failure
+    brings up a fresh process; exit 0 means "stay down"). The bridge waits on
+    `/api/health` for a new `startedAt` and reloads.
+  - `update:*` keeps its phases so the top-bar pill works unchanged, but
+    "ready" now means newer code is on disk than the process loaded
+    (`bin/orbit update`, or an edit in dev). `install` takes the same verified
+    backup the desktop updater did, then restarts.
+  - `map:tile` and `location:search` stay server-side proxies. The browser CSP
+    is `connect-src 'self'` (was `'none'`): the page reaches its own service and
+    nothing else. The CSP is now also sent as a header.
+  - `app:menu` has no native menu behind it. Everything the menu did is on the
+    sidebar and in the palette; the bridge adds Control+N/L/I/, on macOS and
+    Alt+N/L/I/, elsewhere for the accelerators browsers reserve (Cmd+N new
+    window, Cmd+L address bar, Cmd+, preferences). The renderer's own Cmd+K/E/F
+    still work.
+- **The key.** `safeStorage` has no plain-Node equivalent, so
+  `src/server/keys.js` uses the OS credential tool: `security` on macOS with
+  commands over stdin (the key never appears in `ps`), `secret-tool` on Linux,
+  PowerShell DPAPI on Windows (wrapped blob in `<home>/dbkey.bin`, mirroring the
+  desktop layout). No store reachable means no start; there is deliberately no
+  environment-variable or file fallback. The keychain account is derived from
+  the data home so two homes never share a key. Consequence: the desktop app's
+  database cannot be opened by the service (its key is bound to the Electron
+  app); migrate with an `.orbit` archive.
+- **Loopback is not a boundary.** Golinks trusts `127.0.0.1` plus a Host check;
+  Orbit holds a person's whole social graph and the threat model puts "another
+  user on the same machine" in scope, so the service adds a session: a random
+  token in `<home>/session-token` (0600), delivered once through the launch URL
+  (`bin/orbit open`) and exchanged for an `HttpOnly; SameSite=Strict` cookie.
+  Every request except `/api/health` needs it; a browser without one sees a
+  locked page that says how to get in and nothing else. Host, Origin and
+  `Sec-Fetch-Site` checks run before routing. The desktop build's
+  `contextIsolation`/`sandbox` model has no analogue and is retired from
+  `config.security`.
+- **Rejected.** (1) A JSON-file store like golinks: the FTS5 index and SQLCipher
+  are the product. (2) Zero dependencies: the encrypted SQLite addon has to come
+  along; it ships prebuilt for Node 20 through 26, so nothing compiles on
+  install and the dependency list is otherwise unchanged. (3) Relaxing the CSP
+  to fetch tiles directly from CARTO: the proxy keeps the "browser talks only to
+  its own service" property and the on-disk tile cache. (4) A second in-page
+  menubar: the palette already lists every command. (5) Keeping the Electron
+  host alongside as a second target: no one asked for it and every guardrail
+  would need two proofs.
+- **Review pass, same day.** An independent review of the port found three
+  defects that the tests now pin: (1) a restore whose file swap failed after the
+  database was closed left a live process answering 503 forever; the swap now
+  rolls back to the safety snapshot and the restart is requested in every case,
+  since only a fresh process can serve after a close. (2) The wizard's "Save and
+  reload" reopened a results file that its own download had just deleted;
+  downloads take `keep=1` for that channel and the slot lives on the upload TTL.
+  (3) An oversized upload destroyed the socket before the 413 left, so the
+  browser reported "service not responding"; the body is paused instead, the
+  413 carries `connection: close`, and the bridge also checks the file size
+  before uploading. Smaller changes from the same pass: slots are refreshed on
+  every channel read so a long review never expires under the user; the session
+  cookie has a `Max-Age`; boot failures exit 0 so launchd does not crash-loop
+  every five seconds (doctor and `bin/orbit status` explain a down service);
+  `bin/orbit restart` sends SIGTERM and waits instead of `kickstart -k`
+  (SIGKILL); the UI bundle is no longer treated as "code" for the restart pill
+  (the page reloads onto a new bundle by itself, and waits while `vite build`
+  has emptied `dist`); a restart drains in-flight requests first; the bridge
+  marks its own conditions (offline, restarting, too large, session gone) so
+  the toast shows their message instead of the generic code text.
+- **Ops.** `bin/orbit install|start|stop|restart|status|open|doctor|update|logs|run`
+  mirrors golinks; `launchd/dev.orbit.plist.tmpl` is rendered by `install`. The
+  doctor answers "why isn't Orbit working" with a fix per finding, both at
+  `/api/doctor` and in the terminal. Tests run under plain `node --test`; the
+  contract test compares registry, `api-map.js` and `types.d.ts`; a new
+  `test/server-app.test.js` drives the real HTTP host on an ephemeral port.
+
 ## 2026-08-06 - A contact is never left sitting on a line
 
 - The owner zoomed in on contacts that looked crammed, and correctly guessed the
