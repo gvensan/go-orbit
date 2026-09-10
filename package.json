@@ -23,7 +23,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json"
   },
   "dependencies": {
-    "better-sqlite3-multiple-ciphers": "12.11.1",
+    "better-sqlite3-multiple-ciphers": "13.0.3",
     "graphology": "0.26.0",
     "graphology-communities-louvain": "2.0.2",
     "graphology-metrics": "2.4.0",
