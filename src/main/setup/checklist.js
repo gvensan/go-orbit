@@ -115,12 +115,14 @@ function buildSetupStatus(db, info) {
     {
       id: "bookmarklet",
       title: "Add people from any web page",
+      // The bookmarks-bar button is just "Orbit": short in a crowded bar, and the
+      // page it opens says the rest.
       required: false,
       manual: true,
       done: Boolean(marks.bookmarklet),
-      detail: "The Add to Orbit button is a bookmark. On a LinkedIn profile, a company page, or anywhere someone is named, click it and Orbit opens in a tab with that person drafted (name, role, company, link, anything you selected as notes), lets you pick who they connect to (you, or anyone already in Orbit, by name) and how, and adds them with their card open. Drag the button to your bookmarks bar once.",
+      detail: "The Orbit button is a bookmark. On a LinkedIn profile, a company page, or anywhere someone is named, click it and Orbit opens in a tab with that person drafted (name, role, company, link, anything you selected as notes), lets you pick who they connect to (you, or anyone already in Orbit, by name) and how, and adds them with their card open. Drag the button to your bookmarks bar once.",
       hint: "Show the bookmarks bar with Cmd+Shift+B (Ctrl+Shift+B on Windows). If dragging does not work, use Copy code, add a bookmark by hand and paste the code as its address. Select some text on the page first and it lands in the notes.",
-      actions: [{ kind: "bookmarklet", label: "Add to Orbit", value: info.bookmarklet }],
+      actions: [{ kind: "bookmarklet", label: "Orbit", value: info.bookmarklet }],
     },
     {
       id: "backup",

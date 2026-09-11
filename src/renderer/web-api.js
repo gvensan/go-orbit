@@ -5,7 +5,7 @@
 // Four things cannot be an RPC and are handled here instead:
 //   dialogs.openFile   a file picker + upload to a granted import slot
 //   dialogs.saveFile   a granted export slot; the finished file is downloaded
-//   app.onMenu         browser-safe keyboard shortcuts standing in for the menu
+//   app.onMenu         kept for the contract; keys live in the keymap (Settings > Shortcuts)
 //   updates.onStatus   polling; "update" means newer code is on disk
 // It also keeps the page honest about the service: a banner when it is
 // unreachable, a wait-then-reload when a restore or update restarts it, and a
@@ -257,22 +257,9 @@ function onMenu(cb) {
   return () => { menuListeners.delete(cb); };
 }
 
-// Browsers reserve Cmd/Ctrl+N (new window), Cmd/Ctrl+L (address bar) and
-// Cmd+, (preferences), which the desktop menu used. The page keeps those
-// bindings for browsers that pass them through and adds ones every browser
-// leaves alone: Control+key on macOS, Alt+key elsewhere.
-const MENU_KEYS = { KeyN: "new-contact", KeyL: "list", KeyI: "import", Comma: "settings" };
-
-window.addEventListener("keydown", (e) => {
-  const alt = IS_MAC ? (e.ctrlKey && !e.metaKey && !e.altKey) : (e.altKey && !e.ctrlKey && !e.metaKey);
-  if (!alt || e.shiftKey) return;
-  const t = e.target;
-  if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
-  const id = MENU_KEYS[e.code];
-  if (!id) return;
-  e.preventDefault();
-  for (const cb of menuListeners) cb(id);
-});
+// The keyboard alternates for browser-reserved keys live in the keymap
+// (src/shared/keymap.js) and are handled by the app; onMenu stays on the
+// surface for the contract and emits nothing in the browser.
 
 // ---- update status + liveness -------------------------------------------------
 

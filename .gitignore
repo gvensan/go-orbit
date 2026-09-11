@@ -71,3 +71,6 @@ pnpm-debug.log*
 # Service: node symlink made by bin/orbit, and any local data home
 bin/node
 .orbit/
+
+# Demo recording scratch (frames, chrome profile); the scripts and the finished gif/mp4 are committed
+docs/demo/out/

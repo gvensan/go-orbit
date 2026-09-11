@@ -5,8 +5,7 @@
   "main": "src/server/server.js",
   "author": "Orbit",
   "repository": "https://github.com/gvensan/my-orbit.git",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "node src/server/server.js",
     "predev": "npm run build:renderer",

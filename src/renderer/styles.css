@@ -1808,6 +1808,24 @@ input[type="date"] { color-scheme: dark; }
 .addpage-choices .node-menu-item { width: 100%; text-align: left; }
 .node-menu-dot--none { border: 1.5px dashed var(--faint); background: transparent; }
 
+/* Settings > Shortcuts */
+.shortcut-list { margin-top: 8px; }
+.shortcut-row { align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--hairline); }
+.shortcut-row:last-child { border-bottom: 0; }
+.shortcut-slots { display: inline-flex; gap: 6px; width: 190px; flex: none; flex-wrap: wrap; }
+.shortcut-keys {
+  color: var(--text); background: var(--hover); border: 1px solid var(--hairline); border-radius: 5px;
+  padding: 2px 8px; font-size: 12px; white-space: nowrap; cursor: pointer; line-height: 1.6;
+}
+.shortcut-keys:hover { border-color: var(--faint); }
+.shortcut-keys.unbound { color: var(--faint); background: transparent; border-style: dashed; }
+.shortcut-keys.recording { color: var(--accent); border-color: var(--accent); background: transparent; }
+.shortcut-keys--fixed { cursor: default; border-color: transparent; }
+.shortcut-row .field-val { flex: 1; }
+.shortcut-reset { flex: none; padding: 0 8px; font-size: 14px; }
+.shortcut-warn { margin: -2px 0 6px 196px; }
+.shortcut-fixed-head { margin: 18px 0 4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+
 /* Settings > Setup checklist */
 .setup-head { justify-content: space-between; margin-bottom: 6px; }
 .setup-progress-text { font-weight: 600; }

@@ -14,6 +14,32 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-11 - Shortcuts move under Settings and become rebindable
+
+- The sidebar's Shortcuts entry opened a modal that duplicated a list nobody
+  could change. It is now a Settings tab, and `?`, the palette command and the
+  sidebar's Settings all lead there. One table, `src/shared/keymap.js`, holds
+  every rebindable command with its default (and, where the browser reserves
+  the primary, a fallback every browser leaves alone); the app's keyboard
+  handler and every hint or title that names a key read from it, so an edit
+  shows up everywhere at once.
+- **Why rebinding, and why no separate on/off.** Orbit lives in a browser tab
+  and browsers already own several Cmd/Ctrl combos; which fallbacks are free
+  varies by browser, extension set and layout, so a fixed table will collide
+  with someone. A separate enable toggle adds little: an unused key costs
+  nothing, and clearing a binding is the same as disabling it. Mouse gestures
+  and list keys are not shortcuts in this sense and stay fixed.
+- **Rules.** Click a key, press the new one; Backspace while recording clears
+  it; Esc keeps the old one. A combo another command holds is refused by name.
+  A combo the browser reserves is accepted with a warning at the moment of
+  choosing, because a rebound Cmd+key still cannot beat the browser. Per-row
+  and whole-table reset. Overrides are per device in localStorage
+  (`orbit-keymap`), like the theme and palette: a key is about this keyboard,
+  not about the data. A damaged store can only fall back to a default.
+- The browser-safe alternates that the bridge used to hard-code (Control+key
+  on macOS, Alt+key elsewhere) are now second bindings in the table, so they
+  are visible and editable too.
+
 ## 2026-09-10 - Add to Orbit: a bookmarklet, in the golinks shape
 
 - Golinks' "Add to Golinks" is a bookmarks-bar button that saves the page you

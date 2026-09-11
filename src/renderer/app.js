@@ -5,6 +5,8 @@
 import config from "../main/config.js";
 import { CITY_COORDS } from "../shared/cities.js";
 import { guessFromPage } from "../shared/page-guess.js";
+import { createMatcher } from "../shared/keymap.js";
+import { getKeymap, keyLabel, onKeymapChange } from "./keymap.js";
 import { ContactCard } from "./card.js";
 import { EDGE_COLORS, EDGE_TYPES } from "./colors.js";
 import { ExploreView } from "./explore.js";
@@ -23,7 +25,8 @@ import { openImportWizard } from "./wizard.js";
 const $ = (id) => document.getElementById(id);
 const api = window.api;
 const IS_MAC = navigator.platform.startsWith("Mac");
-const shortcut = (key) => IS_MAC ? `⌘${key}` : `Ctrl+${key}`;
+/** The current primary key for a command, for hints and titles ("" when switched off). */
+const shortcut = (commandId) => keyLabel(commandId);
 
 // Carry existing local preferences into Orbit's namespace once, then remove
 // the superseded keys. This keeps the rebrand from resetting users' UI state.
@@ -333,8 +336,8 @@ function goHome() {
   if (home != null) {
     graphView.focusAll(home); // the whole network, centred on you
     showHint(owner != null
-      ? `Home: your whole network - you're at the centre. ${shortcut("K")} to search.`
-      : `Home: your whole network. ${shortcut("K")} to search.`);
+      ? `Home: your whole network - you're at the centre. ${shortcut("palette") || "Search"} to search.`
+      : `Home: your whole network. ${shortcut("palette") || "Search"} to search.`);
   }
   // At large scale focusAll falls back to Mesh; reflect the real mode.
   setCanvasView(graphView.mode === "mesh" ? "mesh" : "graph");
@@ -989,7 +992,7 @@ function runCommand(id) {
     "settings": () => openSettingsPage(),
     "setup": () => openSettingsPage("setup"),
     "about": () => showAbout(),
-    "shortcuts": () => showShortcuts(),
+    "shortcuts": () => openSettingsPage("shortcuts"),
     "backup": () => doBackup(),
     "new-contact": () => palette.open(""),
     "quick-add": () => palette.open("met "),
@@ -1030,30 +1033,6 @@ async function showAbout() {
   }
 }
 
-function showShortcuts() {
-  const m = openModal({ title: "Keyboard shortcuts" });
-  const rows = [
-    [shortcut("K"), "Command palette (search, commands, quick add)"],
-    [shortcut("F"), "Find in the current view"],
-    [shortcut("L"), "Explore (faceted people-search)"],
-    [shortcut("N"), "New contact (via palette)"],
-    [shortcut("E"), "Export archive"],
-    [IS_MAC ? "⌃N · ⌃L · ⌃I · ⌃," : "Alt+N · Alt+L · Alt+I · Alt+,", "New contact · Explore · Import · Settings (work in every browser)"],
-    ["g g", "Graph home"],
-    ["Esc", "Close / clear path / back to home"],
-    ["Del", "Delete selected contact (undoable)"],
-    ["↑ ↓ ↵", "Navigate and open in palette or lists"],
-    ["shift-click node", "Shortest path from the selected contact"],
-    ["right-click node", "Add a connection"],
-    ["drag node", "Reposition a node on the canvas"],
-    ["?", "This overlay"],
-  ];
-  for (const [key, what] of rows) {
-    const row = el("div", "field-row");
-    row.append(el("span", "field-key mono", key), el("span", "field-val dim", what));
-    m.body.append(row);
-  }
-}
 
 const SAMPLE_LABEL = { small: "small · 100", large: "large · 5,000" };
 let sampleBannerDismissed = false;
@@ -1214,7 +1193,7 @@ function ownerOnboarding({ onDone } = {}) {
       return;
     }
     m.close();
-    toast(`Profile saved. Add your first contact with ${shortcut("K")}.`);
+    toast(`Profile saved. Add your first contact with ${shortcut("palette") || "the search box"}.`);
     onDone?.();
   });
   const skip = /** @type {HTMLButtonElement} */ (el("button", null, "Skip for now"));
@@ -1464,7 +1443,7 @@ function openSettingsPage(tab) {
   state.selectedName = null;
   card.hide();
   resetNav();
-  setActiveNav(tab === "setup" ? "setup" : "settings");
+  setActiveNav(tab === "setup" ? "setup" : "settings"); // Shortcuts lives under Settings too
   renderSettings($("settings"), {
     initialTab: tab,
     onSetupChanged: () => refreshSetupNav(),
@@ -1593,63 +1572,58 @@ async function computeInfluence() {
   }
 }
 
+/** Static hints and titles that name a key follow the keymap (data-shortcut="<command>"). */
+function applyShortcutLabels() {
+  document.querySelectorAll("[data-shortcut]").forEach((node) => {
+    const item = /** @type {HTMLElement} */ (node);
+    const label = shortcut(item.dataset.shortcut);
+    item.textContent = label;
+    item.hidden = !label;
+  });
+  document.querySelectorAll("[data-shortcut-title]").forEach((node) => {
+    const item = /** @type {HTMLElement} */ (node);
+    const [label, id] = item.dataset.shortcutTitle.split("|");
+    const key = shortcut(id);
+    item.title = key ? `${label} (${key})` : label;
+  });
+}
+
+/** One keyboard handler, driven by the keymap (Settings > Shortcuts). Esc is
+ *  fixed; everything else resolves through the matcher, chords included. */
 function wireKeyboard() {
-  let lastG = 0;
+  const match = createMatcher(getKeymap);
   window.addEventListener("keydown", (e) => {
-    const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+    if (e.defaultPrevented) return; // a recorder or a control already took it
     const typing = e.target instanceof HTMLInputElement ||
-      e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ||
+      (e.target instanceof HTMLElement && e.target.isContentEditable);
 
-    if (mod && e.key.toLowerCase() === "k") {
-      e.preventDefault();
-      palette.isOpen ? palette.close() : palette.open();
-      return;
-    }
-    if (mod && e.key.toLowerCase() === "e") {
-      e.preventDefault();
-      exportArchiveFlow();
-      return;
-    }
-    if (mod && e.key.toLowerCase() === "l") {
-      e.preventDefault();
-      openList();
-      return;
-    }
-    if (mod && e.key.toLowerCase() === "f") {
-      e.preventDefault();
-      focusCurrentFind();
-      return;
-    }
-    if (mod && e.key.toLowerCase() === "n") {
-      e.preventDefault();
-      palette.open("");
-      return;
-    }
     if (palette.isOpen) {
-      // Esc must close the palette even if its input lost focus.
-      if (e.key === "Escape") {
-        e.preventDefault();
-        palette.close();
-      }
+      // Esc must close the palette even if its input lost focus; its own key toggles it shut.
+      if (e.key === "Escape") { e.preventDefault(); palette.close(); return; }
+      const hit = match(e, { typing: true, isMac: IS_MAC });
+      if (hit.id === "palette") { e.preventDefault(); palette.close(); }
       return;
     }
-    if (typing) return;
 
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && !typing) {
       if (graphView.hasPath) graphView.clearPath();
       else if (navStack.length) popNav();
       else if (state.selectedId != null) goHome();
-    } else if (e.key === "Delete" || e.key === "Backspace") {
-      if (state.selectedId != null) {
-        e.preventDefault();
-        api.contacts.get({ id: state.selectedId }).then((c) => c && deleteContact(c));
-      }
-    } else if (e.key.toLowerCase() === "g" && !mod) {
-      const now = Date.now();
-      if (now - lastG < 400) goHome();
-      lastG = now;
-    } else if (e.key === "?") {
-      showShortcuts();
+      return;
+    }
+
+    const { id, chordStarted } = match(e, { typing, isMac: IS_MAC });
+    if (chordStarted || !id) return;
+    e.preventDefault();
+    switch (id) {
+      case "palette": palette.isOpen ? palette.close() : palette.open(); break;
+      case "find-current": focusCurrentFind(); break;
+      case "new-contact": palette.open(""); break;
+      case "delete-selected":
+        if (state.selectedId != null) api.contacts.get({ id: state.selectedId }).then((c) => c && deleteContact(c));
+        break;
+      default: runCommand(id); // list, import, export-archive, settings, home, shortcuts
     }
   });
 }
@@ -1765,8 +1739,8 @@ export async function init() {
       { label: "Go to graph home", hint: "g g", run: () => goHome() },
       { label: "Insights", hint: "network intelligence", run: () => openInsightsPage() },
       { label: "Find (query builder)", hint: "advanced search", run: () => openFind() },
-      { label: "Explore (facets)", hint: shortcut("L"), run: () => openList() },
-      { label: "Keyboard shortcuts", hint: "?", run: () => showShortcuts() },
+      { label: "Explore (facets)", hint: shortcut("list"), run: () => openList() },
+      { label: "Keyboard shortcuts", hint: "?", run: () => runCommand("shortcuts") },
       { label: "Show graph (force layout)", run: () => goHome() },
       { label: "Show full mesh", hint: "circular", run: () => showMeshGraph() },
       { label: "Show orbit rings", hint: "you at centre", run: () => showOrbitGraph() },
@@ -1782,7 +1756,7 @@ export async function init() {
         },
       },
       { label: "Import contacts…", hint: ".vcf .csv .orbit", run: () => startImport() },
-      { label: "Export archive…", hint: shortcut("E"), run: () => exportArchiveFlow() },
+      { label: "Export archive…", hint: shortcut("export-archive"), run: () => exportArchiveFlow() },
       { label: "Export graph as PNG…", run: () => exportImageFlow() },
       { label: "Export network as GraphML…", run: () => exportGraphMLFlow() },
       { label: "Settings", run: () => openSettingsPage() },
@@ -1946,15 +1920,8 @@ export async function init() {
   $("btn-setup").addEventListener("click", () => ownerOnboarding({ onDone: async () => { await refreshSnapshot(); goHome(); palette.open(""); } }));
   $("btn-sample-small").addEventListener("click", () => loadSample("small"));
   $("btn-sample-large").addEventListener("click", () => loadSample("large"));
-  document.querySelectorAll("[data-shortcut]").forEach((node) => {
-    const item = /** @type {HTMLElement} */ (node);
-    item.textContent = shortcut(item.dataset.shortcut);
-  });
-  document.querySelectorAll("[data-shortcut-title]").forEach((node) => {
-    const item = /** @type {HTMLElement} */ (node);
-    const [label, key] = item.dataset.shortcutTitle.split("|");
-    item.title = `${label} (${shortcut(key)})`;
-  });
+  applyShortcutLabels();
+  onKeymapChange(applyShortcutLabels);
   wireKeyboard();
 
   // Start-screen (landing) actions.

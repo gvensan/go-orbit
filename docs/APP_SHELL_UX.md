@@ -62,7 +62,9 @@ review for weak ones. Recent merges list with one-click undo.
 **Trash.** Soft-deleted contacts with deletion date; restore or purge (purge is
 a real delete, confirmed). Auto-purge after N days, surfaced clearly.
 
-**Settings.** Seven tabs, one per concern; the last-viewed tab is remembered
+**Settings.** Eight tabs, one per concern (*Shortcuts* lists the keyboard model
+in §4 and is where `?`, the palette and the sidebar's Settings all lead; there
+is no separate sidebar entry for it); the last-viewed tab is remembered
 (a first visit lands on *Setup* while a required step is open). *Setup*: the
 checklist of one-time steps in the golinks shape, each self-checking where the
 service can see the answer and "Mark done" where only the user knows, with the
@@ -108,6 +110,13 @@ Keyboard-first; the mouse is always optional.
 | Del | Soft-delete selected (with undo toast) |
 
 Every interactive element has a visible focus ring; tab order is logical.
+
+The table above is the default. Every row except Esc and the list keys is
+rebindable on Settings > Shortcuts (`src/shared/keymap.js` is the one table;
+overrides live in localStorage, per device, beside the theme and palette). A
+combo already in use is refused by name; a browser-reserved combo is accepted
+with a warning, since whether it reaches the page depends on the browser.
+Clearing a binding switches that shortcut off; there is no separate toggle.
 
 ## 5. Empty & error states (cross-cutting)
 

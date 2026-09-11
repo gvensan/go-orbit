@@ -10,6 +10,7 @@ import {
   userPalettes, saveUserPalette, renameUserPalette, deleteUserPalette,
 } from "./colors.js";
 import { RELATIONSHIP_TYPES } from "../shared/relationships.js";
+import { shortcutsSection } from "./shortcuts.js";
 
 const api = () => window.api;
 const settingsControllers = new WeakMap();
@@ -891,6 +892,7 @@ export async function renderSettings(container, opts) {
     { id: "privacy", label: "Privacy & Security", hint: "Encryption, what can leave this device, and telemetry" },
     { id: "data", label: "Data & Backups", hint: "Counts, export and import, backups, and clearing everything" },
     { id: "admin", label: "Review", hint: "Scan your data for broken or contradictory records" },
+    { id: "shortcuts", label: "Shortcuts", hint: "Every key Orbit answers to" },
     { id: "about", label: "About", hint: "Version, updates, and the log file" },
   ];
   const TAB_KEY = "orbit-settings-tab";
@@ -980,6 +982,9 @@ export async function renderSettings(container, opts) {
 
   // --- Admin: run a data review, fix or triage the findings ---
   adminSection(pane("admin"), { onChanged, onOpenContact, onOpenDedup, onShowOnGraph, goTab: selectTab });
+
+  // --- Shortcuts: the keyboard model, one list ---
+  shortcutsSection(pane("shortcuts"), { onChanged: () => { /* labels follow the keymap through onKeymapChange in app.js */ } });
 
   // --- About: version, updates, diagnostics ---
   const about = section(pane("about"), "About");
