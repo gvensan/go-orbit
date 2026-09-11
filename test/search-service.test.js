@@ -44,3 +44,26 @@ test("service answers queries and survives colliding requestIds", async (t) => {
     if (r.results.length) assert.notEqual(r.requestId, 104);
   }
 });
+
+test("terminate right after construction waits for the worker to load, then exits it cleanly", async (t) => {
+  const { dbPath } = makeDb(t);
+  const service = new SearchService({ dbPath, key: TEST_KEY });
+  // The worker is still requiring the native addon here; killing it now would
+  // abort the whole process (N-API fatal). terminate() must wait it out.
+  const code = await service.terminate();
+  assert.equal(code, 0, "the worker closed its own connection and exited 0");
+  assert.equal(await service.exited, 0);
+  assert.equal(await service.terminate(), 0, "idempotent");
+});
+
+test("a query in flight during terminate resolves empty under its own requestId", async (t) => {
+  const { dbPath } = makeDb(t);
+  const service = new SearchService({ dbPath, key: TEST_KEY });
+  assert.equal(await service.ready, true);
+  const pending = service.query({ text: "anything", requestId: 42 });
+  const done = service.terminate();
+  const r = await pending;
+  assert.equal(r.requestId, 42);
+  assert.deepEqual(r.results, []);
+  await done;
+});

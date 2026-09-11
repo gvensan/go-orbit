@@ -100,10 +100,13 @@ function main() {
   function shutdown(code) {
     if (exiting) return;
     exiting = true;
-    try { runtime.teardown(); } catch (e) { log.error("[shutdown] teardown", e); }
+    let done;
+    try { done = Promise.all([runtime.teardown(), runtime.closing]); } catch (e) { log.error("[shutdown] teardown", e); done = Promise.resolve(); }
     app.close().catch(() => {});
-    releaseLock();
-    setTimeout(() => process.exit(code), 150).unref();
+    // Exit only once the workers are down (bounded by config.search timeouts), so
+    // a stop is a clean exit 0 and never a native abort launchd would restart.
+    const exit = () => { releaseLock(); setTimeout(() => process.exit(code), 150).unref(); };
+    done.then(exit, exit);
   }
   // Let the RPC reply reach the browser, then let in-flight handlers finish
   // (an import awaiting the geocoder, say) before the process goes away.

@@ -90,6 +90,12 @@ module.exports = {
     didYouMeanMin: 0.6,         // suggestion floor when recall is empty
     recencyHalfLifeDays: 90,    // interaction recency decay half-life
     hopsMax: 3,                 // cap for the near:/hops: graph operator
+    // Worker lifecycle. Terminating a worker while it is still loading the
+    // native SQLite addon is a fatal in N-API (the whole process aborts), so
+    // shutdown waits for the worker to report ready, asks it to close, and only
+    // forces termination past these limits.
+    workerReadyTimeoutMs: 5000,
+    workerCloseTimeoutMs: 2000,
   },
 
   dedup: {

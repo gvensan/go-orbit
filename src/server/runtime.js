@@ -63,29 +63,37 @@ function bootRuntime({ paths, key, log, devSeed }) {
     /** @type {NodeJS.Timeout | null} */
     backupTimer,
     closed: false,
+    /** @type {Promise<void>} pending worker shutdown after a restore */
+    closing: Promise.resolve(),
     teardown,
     restoreSnapshot,
     restoreLatest,
   };
 
+  /** @returns {Promise<void>} resolves once the search worker has exited */
   function stopServices() {
     if (rt.backupTimer) {
       clearInterval(rt.backupTimer);
       rt.backupTimer = null;
     }
+    let closing = Promise.resolve();
     if (rt.search) {
-      rt.search.terminate().catch(() => {}); // best-effort; dies with the process anyway
+      // Graceful, and awaited by the host before it exits: a worker torn down
+      // mid-load aborts the process, which launchd would read as a crash.
+      closing = rt.search.terminate().then(() => undefined, () => undefined);
       rt.search = null;
     }
     rt.centrality = null; // its worker exits on its own
+    return closing;
   }
 
-  /** Idempotent, synchronous, strict reverse order. */
+  /** Idempotent, strict reverse order. The database work is synchronous; the
+   *  returned promise settles when the search worker has actually exited. */
   function teardown() {
-    if (rt.closed) return;
+    if (rt.closed) return Promise.resolve();
     rt.closed = true;
     log.info("[shutdown] tearing down components");
-    stopServices();
+    const closing = stopServices();
     if (rt.db) {
       if (config.backup.onExit) {
         try {
@@ -103,6 +111,7 @@ function bootRuntime({ paths, key, log, devSeed }) {
     }
     rt.graph = null;
     log.info("[shutdown] clean");
+    return closing;
   }
 
   /** Swap in a verified snapshot. Leaves the runtime closed; the host restarts. */
@@ -120,7 +129,7 @@ function bootRuntime({ paths, key, log, devSeed }) {
     const safety = dbLayer.takeBackup(rt.db, paths.backupDir, { key });
 
     rt.closed = true; // teardown must not double-close what we close here
-    stopServices();
+    rt.closing = stopServices(); // the host awaits this before restarting
     dbLayer.checkpointAndClose(rt.db);
     rt.db = null;
     try {

@@ -13,7 +13,16 @@ const db = new Database(workerData.dbPath, { readonly: true, fileMustExist: true
 db.pragma(`key = '${String(workerData.key).replace(/'/g, "''")}'`);
 const stmts = prepareStatements(db);
 
+// Ready only once the addon is loaded and the connection is open: the service
+// must never terminate this thread before this point (see search/service.js).
+parentPort.postMessage({ ready: true });
+
 parentPort.on("message", (query) => {
+  if (query && query.close) {
+    // Graceful shutdown: close our connection and end the thread ourselves.
+    try { db.close(); } catch { /* already closed */ }
+    process.exit(0);
+  }
   try {
     // token correlates with the service; requestId is the renderer's.
     parentPort.postMessage({ token: query.token, ...search(stmts, query) });

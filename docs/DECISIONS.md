@@ -14,6 +14,34 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-11 - Never terminate a worker that is still loading the addon
+
+- An intermittent whole-file failure in the suite (about one run in eight,
+  always `server-app.test.js`, dead in under half a second with no error text)
+  turned out to be a native abort: `FATAL ERROR: Error::New
+  napi_get_last_error_info`, raised inside the search worker while it was
+  still `require`-ing the SQLite addon. The main thread had called
+  `worker.terminate()` first. A native module torn down mid-initialization
+  cannot raise a JavaScript error, so N-API kills the process instead.
+- This was a production bug wearing a test flake's clothes. The same race
+  existed whenever the service was stopped or a restore ran within about half
+  a second of boot, and an abort exits non-zero, which launchd reads as a crash
+  and restarts the service the owner had just stopped.
+- **The rule now: a worker is never killed before it is ready, and is asked to
+  close before it is forced.** The search worker posts `{ ready: true }` once
+  the addon is loaded and its connection open, and closes its connection and
+  exits itself on `{ close: true }`. `SearchService.terminate()` waits for
+  ready (bounded by `config.search.workerReadyTimeoutMs`), asks, waits for the
+  exit (bounded by `workerCloseTimeoutMs`), and only then falls back to
+  `terminate()`. Queries in flight resolve empty under their own requestId,
+  the same quiet discard a superseded query gets. `runtime.teardown()` returns
+  a promise that settles when the worker has exited, and the host awaits it
+  before `process.exit`, so a stop is an exit 0 every time. The betweenness
+  worker was already safe: it is only terminated after it has posted its
+  result.
+- Pinned by two tests: terminate immediately after construction must resolve
+  with exit code 0, and a query in flight during terminate must resolve empty.
+
 ## 2026-09-11 - macOS is the platform; Windows leaves the CI matrix
 
 - The Electron build listed macOS, Windows and Linux, and the service inherited

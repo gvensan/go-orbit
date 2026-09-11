@@ -34,7 +34,7 @@ async function startApp(t) {
   const { port } = /** @type {import('net').AddressInfo} */ (app.server.address());
   t.after(async () => {
     await app.close();
-    runtime.teardown();
+    await Promise.all([runtime.teardown(), runtime.closing]); // wait for the worker to exit, never kill it mid-load
   });
   const base = `http://127.0.0.1:${port}`;
   const get = (p, headers = {}) => fetch(base + p, { redirect: "manual", headers });
