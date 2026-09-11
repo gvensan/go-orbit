@@ -14,11 +14,14 @@ ships prebuilt for Node 20 through 26 and installs without a compiler.
 ## 2. Requirements
 
 - Node 24 LTS (`.nvmrc`; `engines` in `package.json`).
-- macOS for the scripted login agent (`launchd`). Linux and Windows run the
-  service in the foreground (`bin/orbit run`) or under the user's own supervisor
-  (a systemd user unit, Task Scheduler). The service itself is cross-platform.
-- A credential store: the macOS keychain, a Secret Service on Linux
-  (`secret-tool`), DPAPI on Windows. No store, no start (SECURITY §4).
+- macOS is the supported platform: the scripted login agent (`launchd`), the
+  keychain and the installer. Linux can run the service in the foreground
+  (`bin/orbit run`) with a Secret Service for the key, and CI runs the suite on
+  Ubuntu as a second opinion. Windows is not a target: the DPAPI branch in
+  `keys.js` exists and is unit-tested with a fake shell, but nothing is proven
+  on a real Windows machine and CI does not run there.
+- A credential store: the macOS keychain, or a Secret Service on Linux
+  (`secret-tool`). No store, no start (SECURITY §4).
 
 ## 3. Install
 

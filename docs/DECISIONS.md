@@ -14,6 +14,24 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-11 - macOS is the platform; Windows leaves the CI matrix
+
+- The Electron build listed macOS, Windows and Linux, and the service inherited
+  a three-OS CI matrix. The first time that matrix actually ran (the repository
+  had been private and Actions blocked), macOS and Ubuntu passed in under a
+  minute and Windows hung in `npm test` for twenty minutes with no output.
+  Rather than chase a platform nobody asked for, the owner's call: Orbit is a
+  macOS app, like golinks. Everything user-facing already was (installer,
+  launchd agent, keychain); only the matrix pretended otherwise.
+- CI now runs on macOS and Ubuntu. Ubuntu stays because it is cheap, fast and
+  catches "works only on my Mac" mistakes in the core (paths, permissions,
+  the native prebuild on a second OS). The Windows key-store branch in
+  `keys.js` is kept as written and unit-tested against a fake shell, but is
+  documented as untried; the docs no longer suggest running on Windows.
+- The diagnostic flags added while chasing the hang (job `timeout-minutes`,
+  per-test `--test-timeout`, the spec reporter) stay: a hang anywhere should
+  fail the job and name the test, not hold a runner.
+
 ## 2026-09-11 - The data home moves with `bin/orbit move`, and the CLI reads the installed one
 
 - `ORBIT_HOME` was honoured by the service and baked into the launchd plist,

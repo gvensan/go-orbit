@@ -66,8 +66,10 @@ built-in sample network, not real people.
 
 ## Install
 
-Requirements: Node 24 LTS, and a browser. macOS gets a login agent; Linux and
-Windows run the service in the foreground or under your own supervisor.
+Requirements: a Mac, Node 24 LTS, and a browser. Orbit is built for macOS:
+the login agent, the keychain and the installer are macOS. The service itself
+also runs on Linux in the foreground (`bin/orbit run`, with a Secret Service
+for the key), which is how it is tested in CI; Windows is not a target.
 
 ### Step 1: install Node.js (once)
 
