@@ -13,7 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS is the supported platform; Ubuntu is a cheap second opinion that
+        # catches "works only on my Mac". Windows is not a target (see DECISIONS.md).
+        os: [macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
