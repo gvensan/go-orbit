@@ -14,6 +14,19 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-11 - Dependency bumps: SQLCipher addon 13, supercluster 9, Vite 8.2
+
+- `better-sqlite3-multiple-ciphers` 12.11.1 -> 13.0.3 (better-sqlite3 13.0.3,
+  SQLite 3.53.4, SQLite3MultipleCiphers 2.4.0). Prebuilt binaries now start at
+  Node 22, which the Node 24 floor already satisfies; `verify:native` passes,
+  the suite passes, and the owner's existing database (written by 12.x) opens
+  and passes quick_check under 13.x with no migration. `supercluster` 8 -> 9
+  is ESM-only and ships its own types, so `@types/supercluster` is dropped; it
+  is bundled by Vite and never required by Node, so the module format change
+  costs nothing. `vite` 8.1.5 -> 8.2.2 routine. All three came from
+  Dependabot; taken together after the full local suite because CI is blocked
+  on the account's Actions billing.
+
 ## 2026-09-11 - Shortcuts move under Settings and become rebindable
 
 - The sidebar's Shortcuts entry opened a modal that duplicated a list nobody
