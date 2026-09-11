@@ -3,7 +3,7 @@
 #
 #   From a git clone or an unpacked download, inside the folder:   bash install.sh
 #   Without downloading anything first (installs to ~/orbit):
-#     curl -fsSL https://raw.githubusercontent.com/gvensan/my-orbit/main/install.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/gvensan/go-orbit/main/install.sh | bash
 #
 # Set ORBIT_DIR to install somewhere other than ~/orbit.
 #
@@ -15,7 +15,7 @@
 # Your data never lives in this folder: it goes to ~/.orbit (or ORBIT_HOME).
 set -euo pipefail
 
-REPO="${ORBIT_REPO:-gvensan/my-orbit}"
+REPO="${ORBIT_REPO:-gvensan/go-orbit}"
 BRANCH="${ORBIT_BRANCH:-main}"
 TARBALL="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
 

@@ -9,7 +9,7 @@ DOMAIN="gui/$(id -u 2>/dev/null || echo 0)"
 NODE_LINK="$ROOT/bin/node"
 ORBIT_HOME="${ORBIT_HOME:-$HOME/.orbit}"
 MIN_NODE=24
-REPO="${ORBIT_REPO:-gvensan/my-orbit}"
+REPO="${ORBIT_REPO:-gvensan/go-orbit}"
 BRANCH="${ORBIT_BRANCH:-main}"
 TARBALL="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
 

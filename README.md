@@ -82,7 +82,7 @@ Open **Terminal** (press Cmd+Space, type `Terminal`, press Return), paste this
 line and press Return:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/gvensan/my-orbit/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gvensan/go-orbit/main/install.sh | bash
 ```
 
 That downloads Orbit to an `orbit` folder in your home folder, installs its
@@ -92,7 +92,7 @@ at http://localhost:7779. Set `ORBIT_DIR=/some/path` before the command to
 install somewhere else.
 
 **Prefer to download by hand?** On the
-[GitHub page](https://github.com/gvensan/my-orbit) click the green **Code**
+[GitHub page](https://github.com/gvensan/go-orbit) click the green **Code**
 button, then **Download ZIP**. Unpack it, move the folder to your home folder and
 rename it `orbit`. Then, in Terminal:
 
@@ -104,7 +104,7 @@ bash install.sh
 **Developers**:
 
 ```
-git clone git@github.com:gvensan/my-orbit.git ~/orbit
+git clone git@github.com:gvensan/go-orbit.git ~/orbit
 cd ~/orbit && ./install.sh
 ```
 

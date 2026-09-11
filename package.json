@@ -4,7 +4,7 @@
   "description": "Orbit - a local-first, encrypted relationship CRM that maps your people as a graph, served to your browser by a small Node service on your own machine.",
   "main": "src/server/server.js",
   "author": "Orbit",
-  "repository": "https://github.com/gvensan/my-orbit.git",
+  "repository": "https://github.com/gvensan/go-orbit.git",
   "license": "MIT",
   "scripts": {
     "start": "node src/server/server.js",
