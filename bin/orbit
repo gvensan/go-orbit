@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u 2>/dev/null || echo 0)"
 NODE_LINK="$ROOT/bin/node"
+ENV_HOME="${ORBIT_HOME:-}"   # what the shell said, if anything; the installed agent's value fills in below
+ENV_PORT="${ORBIT_PORT:-}"
 ORBIT_HOME="${ORBIT_HOME:-$HOME/.orbit}"
 MIN_NODE=24
 REPO="${ORBIT_REPO:-gvensan/go-orbit}"
@@ -61,12 +63,14 @@ usage: bin/orbit <command>
   doctor                  check node, agent, port, database, backups
   update                  get the latest code (git pull, or a download when installed from a zip), rebuild, restart
   reset-session           forget the browser session token (all browsers need bin/orbit open again)
+  move <dir>              relocate the data home: copies and re-keys the database and snapshots, re-registers the agent
   logs [n]                follow the service log
   run                     run the service in the foreground (any OS)
   build                   rebuild the web UI
   node                    refresh bin/node after a node upgrade
 
-Environment: ORBIT_HOME (data folder, default ~/.orbit), ORBIT_PORT (default from src/main/config.js).
+Environment: ORBIT_HOME (data folder, default ~/.orbit; set it before install, or use bin/orbit move),
+             ORBIT_PORT (default from src/main/config.js). The installed agent's values apply when unset.
 USAGE
 }
 
@@ -86,9 +90,14 @@ npm_run() { (cd "$ROOT" && "$NODE" "$NODE_BIN_DIR/npm" "$@"); }
 # The port and the agent label live in src/main/config.js (server.port, server.launchdLabel); ORBIT_PORT overrides the port.
 config_port() { "$NODE" -p 'require(process.argv[1] + "/src/main/config").server.port' "$ROOT" 2>/dev/null || echo 7779; }
 config_label() { "$NODE" -p 'require(process.argv[1] + "/src/main/config").server.launchdLabel' "$ROOT" 2>/dev/null || echo dev.orbit; }
-PORT="${ORBIT_PORT:-$(config_port)}"
 LABEL="$(config_label)"
 PLIST="$AGENTS/$LABEL.plist"
+# The installed agent is the source of truth for the home and port when the
+# shell did not say otherwise, so bin/orbit open|status|doctor follow a custom
+# ORBIT_HOME given at install time without it being exported again.
+plist_value() { [ -f "$PLIST" ] && sed -n "/<key>$1<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}" "$PLIST" | head -1 || true; }
+if [ -z "$ENV_HOME" ] && [ -n "$(plist_value ORBIT_HOME)" ]; then ORBIT_HOME="$(plist_value ORBIT_HOME)"; TOKEN_FILE="$ORBIT_HOME/session-token"; fi
+if [ -n "$ENV_PORT" ]; then PORT="$ENV_PORT"; elif [ -n "$(plist_value ORBIT_PORT)" ]; then PORT="$(plist_value ORBIT_PORT)"; else PORT="$(config_port)"; fi
 BASE="http://localhost:$PORT"
 
 token() { [ -f "$TOKEN_FILE" ] && tr -d '\n' < "$TOKEN_FILE" || true; }
@@ -303,6 +312,18 @@ case "${1:-}" in
   doctor) do_doctor ;;
   update) do_update ;;
   update-from) copy_code "${2:?source folder}" ;;
+  move)
+    NEW="${2:?new data folder}"
+    NEW="$("$NODE" -p 'require("path").resolve(process.argv[1])' "$NEW")"
+    echo "Moving Orbit's data from $ORBIT_HOME to $NEW"
+    if is_mac && loaded "$LABEL"; then launchctl bootout "$DOMAIN/$LABEL"; sleep 1; fi
+    "$NODE" "$ROOT/src/server/move-home.js" "$ORBIT_HOME" "$NEW" || { red "move failed; the service was not restarted. Start it again with bin/orbit start"; exit 1; }
+    if is_mac && [ -f "$PLIST" ]; then
+      ORBIT_HOME="$NEW" "$ROOT/bin/orbit" install
+      echo "The login agent now uses $NEW. Delete the old folder when you are satisfied: rm -rf \"$ORBIT_HOME\""
+    else
+      echo "Start the service with: ORBIT_HOME=\"$NEW\" bin/orbit run"
+    fi ;;
   reset-session)
     rm -f "$TOKEN_FILE"
     echo "session token removed; every browser must be re-opened with bin/orbit open"

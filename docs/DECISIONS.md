@@ -14,6 +14,48 @@ rule that assumptions change deliberately, not by drift. Newest first.
   Sigma's touch captor or a unified pointer implementation. Verify mouse,
   touch, and pen input without double-selecting or moving the camera.
 
+## 2026-09-11 - The data home moves with `bin/orbit move`, and the CLI reads the installed one
+
+- `ORBIT_HOME` was honoured by the service and baked into the launchd plist,
+  but the CLI defaulted to `~/.orbit` unless the variable was exported again,
+  so after a custom install `bin/orbit open` looked for the session token in
+  the wrong folder. The CLI now reads the home and port from the installed
+  plist when the shell does not set them; an explicit variable still wins.
+- Moving the folder by hand can never work: keys.js derives the keychain
+  account from the home's path (deliberately, so a scratch home's key can be
+  deleted without touching the real one), so a copied folder meets a fresh key
+  and fails closed. `bin/orbit move <dir>` is the supported route: stop the
+  service, copy the database and every snapshot, re-key each copy to the new
+  path's key with SQLCipher's `PRAGMA rekey` (verified before and after),
+  carry the session token so browsers stay signed in, re-register the agent
+  on the new folder. The old folder and its key are left untouched for the
+  owner to delete; nothing in the move is destructive, and every refusal
+  (service running, target not empty, source does not open) happens before
+  anything is written. `src/server/move-home.js`, covered by
+  `test/server-move-home.test.js`.
+- Rejected: binding the key to the account rather than the path, which would
+  make a bare folder move work. It would also make the demo instance's
+  `stop.sh`, and any future scratch home, share and possibly delete the real
+  key. A path-bound key plus an explicit move is the safer trade.
+
+## 2026-09-11 - The repository is public, and named go-orbit
+
+- Created as the private `my-orbit`, the repository is now public at
+  `github.com/gvensan/go-orbit`, matching the sibling golinks project. The
+  immediate trigger was GitHub Actions: private repositories draw on paid
+  minutes and the account's billing block refused every job before it started,
+  so no push had ever been proven on Windows or Linux. Public repositories run
+  Actions free.
+- **Why this is safe.** Orbit's security posture never rested on the code being
+  secret: the database, its key, the session token and every backup live in
+  `~/.orbit`, outside the repository and ignored by git, and the demo recording
+  shows the built-in sample network, not real people. Making the code public
+  changes nothing about what protects the data (SECURITY_AND_THREAT_MODEL.md).
+- The rename is cosmetic. GitHub redirects the old name; every install, update
+  and README reference was moved to the new one in the same push. The
+  directory on the owner's machine (`gitmine/orbit`) and the npm package name
+  (`orbit`) are unchanged: the product is Orbit, the repository is where it lives.
+
 ## 2026-09-11 - Dependency bumps: SQLCipher addon 13, supercluster 9, Vite 8.2
 
 - `better-sqlite3-multiple-ciphers` 12.11.1 -> 13.0.3 (better-sqlite3 13.0.3,

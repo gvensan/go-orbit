@@ -223,6 +223,32 @@ holds the clear-all danger zone.
 The key is bound to this machine by design. To move to another computer, export
 an archive with a passphrase and import it there.
 
+### Keeping the data somewhere else
+
+The data home defaults to `~/.orbit`. To put it elsewhere (an external disk, a
+folder a backup tool already watches), set `ORBIT_HOME` when you install:
+
+```
+ORBIT_HOME=/Volumes/Vault/orbit ./install.sh
+```
+
+The login agent remembers the folder, and `bin/orbit open`, `status` and
+`doctor` read it from there, so you do not need to export the variable again.
+Do not move the folder by hand afterwards: the database key is tied to the
+folder's path in your keychain, so a copied folder will not open (it fails
+closed, nothing is lost, but nothing works either). Use the command made for it:
+
+```
+bin/orbit move /Volumes/Vault/orbit
+```
+
+That stops the service, copies the database and every snapshot to the new
+folder, re-encrypts each copy to a key stored for the new path, verifies them,
+re-registers the agent on the new folder and starts it. Your browser stays
+signed in. The old folder is left in place for you to delete once the new one
+has proven itself. Synced folders (iCloud, Dropbox) are a poor home for a live
+SQLite database; use them for exported archives instead.
+
 ## Settings
 
 Eight tabs. **Setup** is the checklist above. **You** is the card the network is
