@@ -21,10 +21,24 @@ dim() { printf '\033[2m%s\033[0m\n' "$*"; }
 
 node_major() { "$1" --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p'; }
 
+# Follow a symlink chain to its final target. bin/node is itself a link, so the
+# real interpreter has to be named here: linking bin/node to bin/node makes the
+# launchd ProgramArguments path an unresolvable self-reference (EX_CONFIG).
+resolve_link() {
+  local p="$1" dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    dir="$(dirname "$p")"
+    p="$(readlink "$p")"
+    case "$p" in /*) ;; *) p="$dir/$p" ;; esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 find_node() {
   # Order: bin/node link, nvm default alias, newest nvm node, Volta, Homebrew, PATH. Must be >= MIN_NODE.
   local nvm_dir="${NVM_DIR:-$HOME/.nvm}" cand=() alias v
-  [ -x "$NODE_LINK" ] && cand+=("$NODE_LINK")
+  [ -x "$NODE_LINK" ] && cand+=("$(resolve_link "$NODE_LINK")")
   if [ -f "$nvm_dir/alias/default" ]; then
     alias="$(cat "$nvm_dir/alias/default")"
     v="$(ls "$nvm_dir/versions/node" 2>/dev/null | grep -E "^v?${alias#v}" | sort -V | tail -1 || true)"
@@ -103,8 +117,14 @@ BASE="http://localhost:$PORT"
 token() { [ -f "$TOKEN_FILE" ] && tr -d '\n' < "$TOKEN_FILE" || true; }
 
 link_node() {
-  ln -sfn "$NODE" "$NODE_LINK"
-  echo "bin/node -> $NODE ($("$NODE_LINK" --version))"
+  local target
+  target="$(resolve_link "$NODE")"
+  if [ "$target" = "$NODE_LINK" ]; then
+    red "bin/node does not resolve to a Node binary. Remove it and run this command again."
+    exit 1
+  fi
+  ln -sfn "$target" "$NODE_LINK"
+  echo "bin/node -> $target ($("$NODE_LINK" --version))"
 }
 
 ensure_deps() {
