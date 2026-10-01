@@ -32,10 +32,10 @@
     "world-atlas": "2.0.2"
   },
   "devDependencies": {
-    "@types/node": "24.13.3",
+    "@types/node": "24.19.0",
     "sigma": "3.0.3",
     "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "vite": "8.3.1"
   },
   "engines": {
     "node": ">=24.18 <25"
